@@ -22,27 +22,32 @@ void JigaHardware::begin()
 	pinMode(PIN_BTN_DOWN, INPUT_PULLUP);
 	pinMode(PIN_BTN_LEFT, INPUT_PULLUP);
 	pinMode(PIN_BTN_RIGHT, INPUT_PULLUP);
+
 	digitalWrite(PIN_DUT_RST, LOW);
 	pinMode(PIN_DUT_RST, OUTPUT);
 	analogReference(EXTERNAL);
+
 	lcd.init();
 	lcd.backlight();
 	Serial.begin(BAUD_RATE_DEBUG);
 	serialSoft->begin(BAUD_RATE_CCPS);
+
 	setPWM(255);
 	limparTela();
 }
 
-// --- CONTROLE DE HARDWARE ---
-void JigaHardware::setCarga(bool estado) { digitalWrite(LOAD_ON_PIN, estado ? HIGH : LOW); }
-void JigaHardware::setVbat(bool estado) { digitalWrite(VBAT_ON_PIN, estado ? HIGH : LOW); }
-void JigaHardware::setBateriaCC(bool estado) { digitalWrite(BAT_CC_ON_PIN, estado ? HIGH : LOW); }
+// --- HARDWARE CONTROL ---
+void JigaHardware::setCarga(bool s) { digitalWrite(LOAD_ON_PIN, s ? HIGH : LOW); }
+void JigaHardware::setVbat(bool s) { digitalWrite(VBAT_ON_PIN, s ? HIGH : LOW); }
+void JigaHardware::setBateriaCC(bool s) { digitalWrite(BAT_CC_ON_PIN, s ? HIGH : LOW); }
+
 void JigaHardware::desligarTudo()
 {
 	setCarga(false);
 	setVbat(false);
 	setBateriaCC(false);
 }
+
 void JigaHardware::controlarAlvo(bool ligado)
 {
 	if (ligado)
@@ -56,67 +61,56 @@ void JigaHardware::controlarAlvo(bool ligado)
 		pinMode(PIN_DUT_RST, OUTPUT);
 	}
 }
+
 void JigaHardware::setPWM(int valor)
 {
-	if (valor < 0)
-		valor = 0;
-	if (valor > 255)
-		valor = 255;
-	pwmAtual = valor;
+	pwmAtual = constrain(valor, 0, 255);
 	analogWrite(PIN_PWM_CTRL, pwmAtual);
 }
 int JigaHardware::getPWM() { return pwmAtual; }
 
-bool JigaHardware::ajustarTensaoAutomatico(float alvo, float valorAtual)
+bool JigaHardware::ajustarTensaoAutomatico(float alvo, float atual)
 {
-	float diferenca = valorAtual - alvo;
-	float erroAbs = abs(diferenca);
-	if (erroAbs <= TOLERANCIA_AJUSTE)
+	float erro = abs(atual - alvo);
+	if (erro <= TOLERANCIA_AJUSTE)
 		return true;
-	int passo = 1;
-	if (erroAbs > 1.5)
-		passo = 10;
-	else if (erroAbs > 0.5)
-		passo = 3;
-	if (diferenca < 0)
-		setPWM(pwmAtual - passo);
-	else
-		setPWM(pwmAtual + passo);
+
+	int passo = (erro > 1.5) ? 10 : (erro > 0.5 ? 3 : 1);
+	setPWM(pwmAtual + ((atual < alvo) ? -passo : passo));
 	return false;
 }
 
-// --- COMUNICAÇÃO ---
-void JigaHardware::enviarBytesComoASCII(uint8_t *dados, size_t tamanho)
+// --- COMMS ---
+void JigaHardware::enviarBytesComoASCII(uint8_t *dados, size_t tam)
 {
-	char bufferHex[3];
-	Serial.print("TX ASCII > ");
-	for (size_t i = 0; i < tamanho; i++)
+	char buf[3];
+	Serial.print(F("TX > "));
+	for (size_t i = 0; i < tam; i++)
 	{
-		sprintf(bufferHex, "%02X", dados[i]);
-		serialSoft->print(bufferHex);
-		Serial.print(bufferHex);
+		sprintf(buf, "%02X", dados[i]);
+		serialSoft->print(buf);
+		Serial.print(buf);
 	}
 	Serial.println();
 }
 
 bool JigaHardware::lerPacoteBinario()
 {
-	if (serialSoft->available() > 0)
+	if (serialSoft->available())
 	{
-		unsigned long tempoUltimoByte = millis();
+		unsigned long tLast = millis();
 		tamanhoBufferRaw = 0;
-		while ((millis() - tempoUltimoByte) < 100)
+		while ((millis() - tLast) < 100)
 		{
 			if (serialSoft->available())
 			{
 				uint8_t b = serialSoft->read();
 				if (tamanhoBufferRaw < TAM_BUFFER)
 					bufferRaw[tamanhoBufferRaw++] = b;
-				tempoUltimoByte = millis();
+				tLast = millis();
 			}
 		}
-		if (tamanhoBufferRaw > 0)
-			return true;
+		return (tamanhoBufferRaw > 0);
 	}
 	return false;
 }
@@ -130,79 +124,23 @@ void JigaHardware::limparBufferUART()
 		serialSoft->read();
 }
 
-// --- INTERFACE (IMPLEMENTAÇÃO DAS SOBRECARGAS) ---
-
+// --- UI ---
 void JigaHardware::limparTela() { lcd.clear(); }
 
+// IMPLEMENTAÇÃO DA FUNÇÃO QUE FALTAVA
 void JigaHardware::escreverLinha(int linha, const char *texto)
 {
 	lcd.setCursor(0, linha);
 	lcd.print(texto);
 }
 
-// 1. Tudo RAM
-void JigaHardware::mostrarTelaMensagem(const char *l1, const char *l2, const char *l3, const char *l4)
+void JigaHardware::atualizarParteTela(int l, int c, const char *txt)
 {
-	lcd.clear();
-	lcd.setCursor(0, 0);
-	lcd.print(l1);
-	lcd.setCursor(0, 1);
-	lcd.print(l2);
-	lcd.setCursor(0, 2);
-	lcd.print(l3);
-	lcd.setCursor(0, 3);
-	lcd.print(l4);
+	lcd.setCursor(c, l);
+	lcd.print(txt);
 }
 
-// 2. Tudo Flash (F())
-void JigaHardware::mostrarTelaMensagem(const __FlashStringHelper *l1, const __FlashStringHelper *l2, const __FlashStringHelper *l3, const __FlashStringHelper *l4)
-{
-	lcd.clear();
-	lcd.setCursor(0, 0);
-	lcd.print(l1);
-	lcd.setCursor(0, 1);
-	lcd.print(l2);
-	if (l3)
-	{
-		lcd.setCursor(0, 2);
-		lcd.print(l3);
-	}
-	if (l4)
-	{
-		lcd.setCursor(0, 3);
-		lcd.print(l4);
-	}
-}
-
-// 3. Híbrido A (F, F, RAM, RAM)
-void JigaHardware::mostrarTelaMensagem(const __FlashStringHelper *l1, const __FlashStringHelper *l2, const char *l3, const char *l4)
-{
-	lcd.clear();
-	lcd.setCursor(0, 0);
-	lcd.print(l1);
-	lcd.setCursor(0, 1);
-	lcd.print(l2);
-	lcd.setCursor(0, 2);
-	lcd.print(l3);
-	lcd.setCursor(0, 3);
-	lcd.print(l4);
-}
-
-// 4. Híbrido B (F, RAM, RAM, RAM) - O QUE CONSERTA SEU ERRO ATUAL
-void JigaHardware::mostrarTelaMensagem(const __FlashStringHelper *l1, const char *l2, const char *l3, const char *l4)
-{
-	lcd.clear();
-	lcd.setCursor(0, 0);
-	lcd.print(l1);
-	lcd.setCursor(0, 1);
-	lcd.print(l2);
-	lcd.setCursor(0, 2);
-	lcd.print(l3);
-	lcd.setCursor(0, 3);
-	lcd.print(l4);
-}
-
-// --- SENSORES ---
+// --- SENSORS & INPUTS ---
 float JigaHardware::lerADC(int pino)
 {
 	long soma = 0;
@@ -216,30 +154,25 @@ float JigaHardware::lerADC(int pino)
 
 LeituraSensores JigaHardware::lerTudo()
 {
-	LeituraSensores d;
-	d.vLoad = lerADC(PIN_AD_LOAD_VOUT);
-	d.vCCPS = lerADC(PIN_AD_CCPS_VOUT);
-	d.vCap = lerADC(PIN_AD_CCPS_CAP);
-	d.v3v3 = lerADC(PIN_3V3_CCPS);
-	return d;
+	return {lerADC(PIN_AD_LOAD_VOUT), lerADC(PIN_AD_CCPS_VOUT),
+		lerADC(PIN_AD_CCPS_CAP), lerADC(PIN_3V3_CCPS)};
 }
 
-// --- INPUTS ---
-Tecla JigaHardware::checarBotaoIndividual(int pino, Tecla teclaId, EstadoBotao &estado)
+Tecla JigaHardware::checarBotao(int pino, Tecla id, EstadoBotao &est)
 {
 	bool leitura = digitalRead(pino);
-	if (leitura != estado.estadoFisicoAnterior)
+	if (leitura != est.estadoFisico)
 	{
-		estado.ultimoTempo = millis();
-		estado.estadoFisicoAnterior = leitura;
+		est.ultimoTempo = millis();
+		est.estadoFisico = leitura;
 	}
-	if ((millis() - estado.ultimoTempo) > 40)
+	if ((millis() - est.ultimoTempo) > 40)
 	{
-		if (leitura != estado.estadoLogico)
+		if (leitura != est.estadoLogico)
 		{
-			estado.estadoLogico = leitura;
-			if (estado.estadoLogico == LOW)
-				return teclaId;
+			est.estadoLogico = leitura;
+			if (est.estadoLogico == LOW)
+				return id;
 		}
 	}
 	return NENHUMA;
@@ -248,24 +181,24 @@ Tecla JigaHardware::checarBotaoIndividual(int pino, Tecla teclaId, EstadoBotao &
 Tecla JigaHardware::lerTeclado()
 {
 	Tecla t;
-	if ((t = checarBotaoIndividual(PIN_BTN_LEFT, TECLA_ESC, btnLeft)) != NENHUMA)
+	if ((t = checarBotao(PIN_BTN_LEFT, TECLA_ESC, btnLeft)) != NENHUMA)
 		return t;
-	if ((t = checarBotaoIndividual(PIN_BTN_RIGHT, TECLA_ENTER, btnRight)) != NENHUMA)
+	if ((t = checarBotao(PIN_BTN_RIGHT, TECLA_ENTER, btnRight)) != NENHUMA)
 		return t;
-	if ((t = checarBotaoIndividual(PIN_BTN_UP, TECLA_CIMA, btnUp)) != NENHUMA)
+	if ((t = checarBotao(PIN_BTN_UP, TECLA_CIMA, btnUp)) != NENHUMA)
 		return t;
-	if ((t = checarBotaoIndividual(PIN_BTN_DOWN, TECLA_BAIXO, btnDown)) != NENHUMA)
+	if ((t = checarBotao(PIN_BTN_DOWN, TECLA_BAIXO, btnDown)) != NENHUMA)
 		return t;
 	return NENHUMA;
 }
 
 bool JigaHardware::checarResetEmergencia()
 {
-	return (digitalRead(PIN_BTN_UP) == LOW && digitalRead(PIN_BTN_DOWN) == LOW &&
-		digitalRead(PIN_BTN_LEFT) == LOW && digitalRead(PIN_BTN_RIGHT) == LOW);
+	return (!digitalRead(PIN_BTN_UP) && !digitalRead(PIN_BTN_DOWN) &&
+		!digitalRead(PIN_BTN_LEFT) && !digitalRead(PIN_BTN_RIGHT));
 }
 
-// --- SOM ---
+// --- AUDIO ---
 void JigaHardware::beep()
 {
 	digitalWrite(PIN_BUZZER, HIGH);
@@ -307,10 +240,4 @@ void JigaHardware::tocarMelodiaDerrota()
 	digitalWrite(PIN_BUZZER, HIGH);
 	delay(1200);
 	digitalWrite(PIN_BUZZER, LOW);
-}
-
-void JigaHardware::atualizarParteTela(int linha, int coluna, const char* texto) {
-    // Posiciona o cursor no lugar exato (buraco do template)
-    lcd.setCursor(coluna, linha);
-    lcd.print(texto);
 }

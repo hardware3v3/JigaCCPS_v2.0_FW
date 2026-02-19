@@ -25,7 +25,7 @@ struct LeituraSensores
 
 struct EstadoBotao
 {
-	bool estadoFisicoAnterior;
+	bool estadoFisico;
 	bool estadoLogico;
 	unsigned long ultimoTempo;
 };
@@ -40,7 +40,7 @@ private:
 	uint8_t bufferRaw[TAM_BUFFER];
 	int tamanhoBufferRaw;
 	EstadoBotao btnUp, btnDown, btnRight, btnLeft;
-	Tecla checarBotaoIndividual(int pino, Tecla teclaId, EstadoBotao &estado);
+	Tecla checarBotao(int pino, Tecla id, EstadoBotao &estado);
 	float lerADC(int pino);
 
 public:
@@ -51,8 +51,8 @@ public:
 	void setCarga(bool estado);
 	void setVbat(bool estado);
 	void setBateriaCC(bool estado);
-	void controlarAlvo(bool ligado);
 	void desligarTudo();
+	void controlarAlvo(bool ligado);
 	void setPWM(int valor);
 	int getPWM();
 	bool ajustarTensaoAutomatico(float alvo, float valorAtual);
@@ -64,28 +64,43 @@ public:
 	size_t getTamanhoBuffer();
 	void limparBufferUART();
 
-	// Interface HMI
+	// Interface
 	Tecla lerTeclado();
 	bool checarResetEmergencia();
 	void limparTela();
-	void escreverLinha(int linha, const char *texto);
-	void atualizarParteTela(int linha, int coluna, const char* texto);
 
-	// --- SOBRECARGAS DE MENSAGEM (Para resolver todos os erros de compilação) ---
+	// --- FUNÇÕES DE TEXTO ---
+	void escreverLinha(int linha, const char *texto); // <--- A FUNÇÃO QUE FALTAVA
+	void atualizarParteTela(int linha, int coluna, const char *texto);
 
-	// 1. Tudo RAM (Strings normais ou variáveis)
-	void mostrarTelaMensagem(const char *l1, const char *l2, const char *l3 = "", const char *l4 = "");
+	// --- TEMPLATES DE MENSAGEM (Coringa para Flash/RAM) ---
+	template <typename T1, typename T2, typename T3, typename T4>
+	void mostrarTelaMensagem(T1 l1, T2 l2, T3 l3, T4 l4)
+	{
+		lcd.clear();
+		lcd.setCursor(0, 0);
+		lcd.print(l1);
+		lcd.setCursor(0, 1);
+		lcd.print(l2);
+		lcd.setCursor(0, 2);
+		lcd.print(l3);
+		lcd.setCursor(0, 3);
+		lcd.print(l4);
+	}
 
-	// 2. Tudo Flash (Uso de F() em tudo)
-	void mostrarTelaMensagem(const __FlashStringHelper *l1, const __FlashStringHelper *l2, const __FlashStringHelper *l3 = NULL, const __FlashStringHelper *l4 = NULL);
+	template <typename T1, typename T2, typename T3>
+	void mostrarTelaMensagem(T1 l1, T2 l2, T3 l3)
+	{
+		mostrarTelaMensagem(l1, l2, l3, "");
+	}
 
-	// 3. Híbrido A: Titulo e Subtitulo em Flash, resto em RAM (Para menus fixos com valores)
-	void mostrarTelaMensagem(const __FlashStringHelper *l1, const __FlashStringHelper *l2, const char *l3, const char *l4);
+	template <typename T1, typename T2>
+	void mostrarTelaMensagem(T1 l1, T2 l2)
+	{
+		mostrarTelaMensagem(l1, l2, "", "");
+	}
 
-	// 4. Híbrido B: Só Título em Flash, resto em RAM (O QUE FALTAVA!)
-	void mostrarTelaMensagem(const __FlashStringHelper *l1, const char *l2, const char *l3, const char *l4);
-
-	// Audio
+	// Áudio
 	void beep();
 	void beepSucesso();
 	void beepErro();

@@ -1,0 +1,1296 @@
+
+==================================================
+ARQUIVO: \Config.h
+==================================================
+
+#ifndef CONFIG_H
+#define CONFIG_H
+
+#include <Arduino.h>
+
+// ==========================================
+// 1. PINOUT (HARDWARE)
+// ==========================================
+
+// Atuadores
+#define PIN_PWM_CTRL 11
+#define LOAD_ON_PIN 12
+#define VBAT_ON_PIN 6
+#define BAT_CC_ON_PIN A3
+#define PIN_BUZZER 4
+
+// Comunicação
+#define PIN_RX_SOFT 2 // RX Arduino -> TX Alvo
+#define PIN_TX_SOFT 5 // TX Arduino -> RX Alvo
+#define PIN_DUT_RST 3 // Controle de Reset do Alvo
+#define BAUD_RATE_CCPS 19200
+#define BAUD_RATE_DEBUG 9600
+
+// Sensores Analógicos
+#define PIN_AD_LOAD_VOUT A0
+#define PIN_AD_CCPS_VOUT A1
+#define PIN_AD_CCPS_CAP A2
+#define PIN_3V3_CCPS A7
+
+// Display I2C
+#define LCD_ADDR 0x27
+#define LCD_COLS 20
+#define LCD_ROWS 4
+
+// ==========================================
+// 2. INPUTS (MAPEAMENTO DE BOTÕES)
+// ==========================================
+// Comente a linha abaixo se for usar na bancada (sem caixa invertida)
+#define PAINEL_INVERTIDO
+
+#ifdef PAINEL_INVERTIDO
+#define PIN_BTN_UP 10
+#define PIN_BTN_DOWN 7
+#define PIN_BTN_LEFT 9
+#define PIN_BTN_RIGHT 8
+#else
+#define PIN_BTN_UP 7
+#define PIN_BTN_DOWN 10
+#define PIN_BTN_LEFT 8
+#define PIN_BTN_RIGHT 9
+#endif
+
+// ==========================================
+// 3. CONSTANTES DE FÍSICA E CALIBRAÇÃO
+// ==========================================
+const float R1_DIVIDER = 18000.0;
+const float R2_DIVIDER = 1000.0;
+const float V_REF_AREF = 2.495;
+const float FATOR_CONVERSAO = (R1_DIVIDER + R2_DIVIDER) / R2_DIVIDER;
+
+// ==========================================
+// 4. PARÂMETROS DE TESTE (Business Logic)
+// ==========================================
+const float V_TEST_UNDER = 11.5;
+const float V_TEST_0_25 = 12.2;
+const float V_TEST_25_50 = 12.8;
+const float V_TEST_50_75 = 13.4;
+const float V_TEST_75_100 = 13.8;
+const float V_TEST_OVER = 14.4;
+const float V_TEST_CRITICAL = 18.0;
+
+// --- CONSTANTES PARA TESTE AMS ---
+const float V_AMS_CHECK = 20.0;	 // Tensão de estabilidade
+const float V_AMS_STRESS = 25.0; // Tensão de estresse (destrutiva)
+const float V_3V3_MIN = 3.1;
+const float V_3V3_MAX = 3.5;
+
+const float TOLERANCIA_AJUSTE = 0.10;
+
+#endif
+
+------------------------------ FIM DE: \Config.h ------------------------------
+
+
+==================================================
+ARQUIVO: \JigaHardware.cpp
+==================================================
+
+#include "JigaHardware.h"
+
+JigaHardware::JigaHardware() : lcd(LCD_ADDR, LCD_COLS, LCD_ROWS)
+{
+	pwmAtual = 255;
+	tamanhoBufferRaw = 0;
+	serialSoft = new SoftwareSerial(PIN_RX_SOFT, PIN_TX_SOFT);
+	btnUp = {HIGH, HIGH, 0};
+	btnDown = {HIGH, HIGH, 0};
+	btnRight = {HIGH, HIGH, 0};
+	btnLeft = {HIGH, HIGH, 0};
+}
+
+void JigaHardware::begin()
+{
+	pinMode(PIN_PWM_CTRL, OUTPUT);
+	pinMode(LOAD_ON_PIN, OUTPUT);
+	pinMode(VBAT_ON_PIN, OUTPUT);
+	pinMode(BAT_CC_ON_PIN, OUTPUT);
+	pinMode(PIN_BUZZER, OUTPUT);
+	pinMode(PIN_BTN_UP, INPUT_PULLUP);
+	pinMode(PIN_BTN_DOWN, INPUT_PULLUP);
+	pinMode(PIN_BTN_LEFT, INPUT_PULLUP);
+	pinMode(PIN_BTN_RIGHT, INPUT_PULLUP);
+
+	digitalWrite(PIN_DUT_RST, LOW);
+	pinMode(PIN_DUT_RST, OUTPUT);
+	analogReference(EXTERNAL);
+
+	lcd.init();
+	lcd.backlight();
+	Serial.begin(BAUD_RATE_DEBUG);
+	serialSoft->begin(BAUD_RATE_CCPS);
+
+	setPWM(255);
+	limparTela();
+}
+
+// --- HARDWARE CONTROL ---
+void JigaHardware::setCarga(bool s) { digitalWrite(LOAD_ON_PIN, s ? HIGH : LOW); }
+void JigaHardware::setVbat(bool s) { digitalWrite(VBAT_ON_PIN, s ? HIGH : LOW); }
+void JigaHardware::setBateriaCC(bool s) { digitalWrite(BAT_CC_ON_PIN, s ? HIGH : LOW); }
+
+void JigaHardware::desligarTudo()
+{
+	setCarga(false);
+	setVbat(false);
+	setBateriaCC(false);
+}
+
+void JigaHardware::controlarAlvo(bool ligado)
+{
+	if (ligado)
+	{
+		pinMode(PIN_DUT_RST, INPUT);
+		delay(100);
+	}
+	else
+	{
+		digitalWrite(PIN_DUT_RST, LOW);
+		pinMode(PIN_DUT_RST, OUTPUT);
+	}
+}
+
+void JigaHardware::setPWM(int valor)
+{
+	pwmAtual = constrain(valor, 0, 255);
+	analogWrite(PIN_PWM_CTRL, pwmAtual);
+}
+int JigaHardware::getPWM() { return pwmAtual; }
+
+bool JigaHardware::ajustarTensaoAutomatico(float alvo, float atual)
+{
+	float erro = abs(atual - alvo);
+	if (erro <= TOLERANCIA_AJUSTE)
+		return true;
+
+	int passo = (erro > 1.5) ? 10 : (erro > 0.5 ? 3 : 1);
+	setPWM(pwmAtual + ((atual < alvo) ? -passo : passo));
+	return false;
+}
+
+// --- COMMS ---
+void JigaHardware::enviarBytesComoASCII(uint8_t *dados, size_t tam)
+{
+	char buf[3];
+	Serial.print(F("TX > "));
+	for (size_t i = 0; i < tam; i++)
+	{
+		sprintf(buf, "%02X", dados[i]);
+		serialSoft->print(buf);
+		Serial.print(buf);
+	}
+	Serial.println();
+}
+
+bool JigaHardware::lerPacoteBinario()
+{
+	if (serialSoft->available())
+	{
+		unsigned long tLast = millis();
+		tamanhoBufferRaw = 0;
+		while ((millis() - tLast) < 100)
+		{
+			if (serialSoft->available())
+			{
+				uint8_t b = serialSoft->read();
+				if (tamanhoBufferRaw < TAM_BUFFER)
+					bufferRaw[tamanhoBufferRaw++] = b;
+				tLast = millis();
+			}
+		}
+		return (tamanhoBufferRaw > 0);
+	}
+	return false;
+}
+
+uint8_t *JigaHardware::getBufferBytes() { return bufferRaw; }
+size_t JigaHardware::getTamanhoBuffer() { return tamanhoBufferRaw; }
+void JigaHardware::limparBufferUART()
+{
+	tamanhoBufferRaw = 0;
+	while (serialSoft->available())
+		serialSoft->read();
+}
+
+// --- UI ---
+void JigaHardware::limparTela() { lcd.clear(); }
+void JigaHardware::atualizarParteTela(int l, int c, const char *txt)
+{
+	lcd.setCursor(c, l);
+	lcd.print(txt);
+}
+
+// NOTA: As funções mostrarTelaMensagem foram removidas daqui pois agora
+// são Templates definidos diretamente no JigaHardware.h
+
+// --- SENSORS & INPUTS ---
+float JigaHardware::lerADC(int pino)
+{
+	long soma = 0;
+	for (int i = 0; i < 5; i++)
+	{
+		soma += analogRead(pino);
+		delay(1);
+	}
+	return (soma / 5.0) * (V_REF_AREF / 1023.0) * FATOR_CONVERSAO;
+}
+
+LeituraSensores JigaHardware::lerTudo()
+{
+	return {lerADC(PIN_AD_LOAD_VOUT), lerADC(PIN_AD_CCPS_VOUT),
+		lerADC(PIN_AD_CCPS_CAP), lerADC(PIN_3V3_CCPS)};
+}
+
+Tecla JigaHardware::checarBotao(int pino, Tecla id, EstadoBotao &est)
+{
+	bool leitura = digitalRead(pino);
+	if (leitura != est.estadoFisico)
+	{
+		est.ultimoTempo = millis();
+		est.estadoFisico = leitura;
+	}
+	if ((millis() - est.ultimoTempo) > 40)
+	{
+		if (leitura != est.estadoLogico)
+		{
+			est.estadoLogico = leitura;
+			if (est.estadoLogico == LOW)
+				return id;
+		}
+	}
+	return NENHUMA;
+}
+
+Tecla JigaHardware::lerTeclado()
+{
+	Tecla t;
+	if ((t = checarBotao(PIN_BTN_LEFT, TECLA_ESC, btnLeft)) != NENHUMA)
+		return t;
+	if ((t = checarBotao(PIN_BTN_RIGHT, TECLA_ENTER, btnRight)) != NENHUMA)
+		return t;
+	if ((t = checarBotao(PIN_BTN_UP, TECLA_CIMA, btnUp)) != NENHUMA)
+		return t;
+	if ((t = checarBotao(PIN_BTN_DOWN, TECLA_BAIXO, btnDown)) != NENHUMA)
+		return t;
+	return NENHUMA;
+}
+
+bool JigaHardware::checarResetEmergencia()
+{
+	return (!digitalRead(PIN_BTN_UP) && !digitalRead(PIN_BTN_DOWN) &&
+		!digitalRead(PIN_BTN_LEFT) && !digitalRead(PIN_BTN_RIGHT));
+}
+
+// --- AUDIO ---
+void JigaHardware::beep()
+{
+	digitalWrite(PIN_BUZZER, HIGH);
+	delay(20);
+	digitalWrite(PIN_BUZZER, LOW);
+}
+void JigaHardware::beepSucesso()
+{
+	for (int i = 0; i < 3; i++)
+	{
+		beep();
+		delay(50);
+	}
+}
+void JigaHardware::beepErro()
+{
+	digitalWrite(PIN_BUZZER, HIGH);
+	delay(800);
+	digitalWrite(PIN_BUZZER, LOW);
+}
+void JigaHardware::tocarMelodiaVitoria()
+{
+	beep();
+	delay(100);
+	beep();
+	delay(100);
+	beep();
+	delay(100);
+	digitalWrite(PIN_BUZZER, HIGH);
+	delay(1000);
+	digitalWrite(PIN_BUZZER, LOW);
+}
+void JigaHardware::tocarMelodiaDerrota()
+{
+	digitalWrite(PIN_BUZZER, HIGH);
+	delay(800);
+	digitalWrite(PIN_BUZZER, LOW);
+	delay(500);
+	digitalWrite(PIN_BUZZER, HIGH);
+	delay(1200);
+	digitalWrite(PIN_BUZZER, LOW);
+}
+
+------------------------------ FIM DE: \JigaHardware.cpp ------------------------------
+
+
+==================================================
+ARQUIVO: \JigaHardware.h
+==================================================
+
+#ifndef JIGAHARDWARE_H
+#define JIGAHARDWARE_H
+
+#include <Arduino.h>
+#include <LiquidCrystal_I2C.h>
+#include <SoftwareSerial.h>
+#include "Config.h"
+
+enum Tecla
+{
+	NENHUMA,
+	TECLA_CIMA,
+	TECLA_BAIXO,
+	TECLA_ENTER,
+	TECLA_ESC
+};
+
+struct LeituraSensores
+{
+	float vLoad;
+	float vCCPS;
+	float vCap;
+	float v3v3;
+};
+
+struct EstadoBotao
+{
+	bool estadoFisico;
+	bool estadoLogico;
+	unsigned long ultimoTempo;
+};
+
+class JigaHardware
+{
+private:
+	LiquidCrystal_I2C lcd;
+	SoftwareSerial *serialSoft;
+	int pwmAtual;
+	static const int TAM_BUFFER = 64;
+	uint8_t bufferRaw[TAM_BUFFER];
+	int tamanhoBufferRaw;
+	EstadoBotao btnUp, btnDown, btnRight, btnLeft;
+	Tecla checarBotao(int pino, Tecla id, EstadoBotao &estado);
+	float lerADC(int pino);
+
+public:
+	JigaHardware();
+	void begin();
+
+	// Atuadores
+	void setCarga(bool estado);
+	void setVbat(bool estado);
+	void setBateriaCC(bool estado);
+	void desligarTudo();
+	void controlarAlvo(bool ligado);
+	void setPWM(int valor);
+	int getPWM();
+	bool ajustarTensaoAutomatico(float alvo, float valorAtual);
+
+	// Comunicação
+	void enviarBytesComoASCII(uint8_t *dados, size_t tamanho);
+	bool lerPacoteBinario();
+	uint8_t *getBufferBytes();
+	size_t getTamanhoBuffer();
+	void limparBufferUART();
+
+	// Interface
+	Tecla lerTeclado();
+	bool checarResetEmergencia();
+	void limparTela();
+	void atualizarParteTela(int linha, int coluna, const char *texto);
+
+	// --- A SOLUÇÃO DEFINITIVA (TEMPLATES / CORINGA) ---
+	// Aceita QUALQUER combinação de String, char*, F(""), inteiros, etc.
+	// O compilador gera a função perfeita para você automaticamente.
+
+	// Versão com 4 Linhas
+	template <typename T1, typename T2, typename T3, typename T4>
+	void mostrarTelaMensagem(T1 l1, T2 l2, T3 l3, T4 l4)
+	{
+		lcd.clear();
+		lcd.setCursor(0, 0);
+		lcd.print(l1);
+		lcd.setCursor(0, 1);
+		lcd.print(l2);
+		lcd.setCursor(0, 2);
+		lcd.print(l3);
+		lcd.setCursor(0, 3);
+		lcd.print(l4);
+	}
+
+	// Versão com 3 Linhas (4ª fica vazia)
+	template <typename T1, typename T2, typename T3>
+	void mostrarTelaMensagem(T1 l1, T2 l2, T3 l3)
+	{
+		mostrarTelaMensagem(l1, l2, l3, "");
+	}
+
+	// Versão com 2 Linhas (3ª e 4ª ficam vazias)
+	template <typename T1, typename T2>
+	void mostrarTelaMensagem(T1 l1, T2 l2)
+	{
+		mostrarTelaMensagem(l1, l2, "", "");
+	}
+	// ---------------------------------------------------
+
+	// Áudio
+	void beep();
+	void beepSucesso();
+	void beepErro();
+	void tocarMelodiaVitoria();
+	void tocarMelodiaDerrota();
+
+	// Sensores
+	LeituraSensores lerTudo();
+};
+
+#endif
+
+------------------------------ FIM DE: \JigaHardware.h ------------------------------
+
+
+==================================================
+ARQUIVO: \main.cpp
+==================================================
+
+#include <Arduino.h>
+#include "JigaHardware.h"
+#include "TestController.h"
+
+// 1. Instanciar Hardware
+JigaHardware hardware;
+
+// 2. Instanciar Lógica de Teste (Injetando o hardware)
+TestController controller(hardware);
+
+void setup() {
+    // Inicializa Hardware
+    hardware.begin();
+    
+    // Inicializa Lógica
+    controller.begin();
+    
+    hardware.beep(); // Check sonoro de boot
+}
+
+void loop() {
+    // O loop apenas roda o "cérebro" da jiga
+    controller.run();
+}
+
+------------------------------ FIM DE: \main.cpp ------------------------------
+
+
+==================================================
+ARQUIVO: \Protocolo.cpp
+==================================================
+
+#include "Protocolo.h"
+
+uint8_t Protocolo::charParaByte(char c)
+{
+	if (c >= '0' && c <= '9')
+		return c - '0';
+	if (c >= 'A' && c <= 'F')
+		return 10 + (c - 'A');
+	if (c >= 'a' && c <= 'f')
+		return 10 + (c - 'a');
+	return 0;
+}
+
+uint16_t Protocolo::calcularCRC16(const uint8_t *data, size_t length)
+{
+	uint16_t crc = 0x0000;
+	uint16_t polynomial = 0xA001;
+
+	for (size_t i = 0; i < length; i++)
+	{
+		crc ^= data[i];
+		for (uint8_t j = 0; j < 8; j++)
+		{
+			if (crc & 1)
+			{
+				crc = (crc >> 1) ^ polynomial;
+			}
+			else
+			{
+				crc >>= 1;
+			}
+		}
+	}
+	return crc;
+}
+
+size_t Protocolo::anexarCRC(uint8_t *buffer, size_t length)
+{
+	uint16_t crc = calcularCRC16(buffer, length);
+	// Little Endian
+	buffer[length] = (uint8_t)(crc & 0xFF);
+	buffer[length + 1] = (uint8_t)((crc >> 8) & 0xFF);
+	return length + 2;
+}
+
+bool Protocolo::verificarCRC(uint8_t *buffer, size_t length)
+{
+	if (length < 3)
+		return false;
+	uint8_t crcLow = buffer[length - 2];
+	uint8_t crcHigh = buffer[length - 1];
+	uint16_t crcRecebido = (crcHigh << 8) | crcLow;
+	uint16_t crcCalculado = calcularCRC16(buffer, length - 2);
+	return (crcCalculado == crcRecebido);
+}
+
+RespostaInterpretada Protocolo::interpretarPacote(uint8_t *bufferRaw, size_t lengthRaw)
+{
+	RespostaInterpretada resp = {false, 0, 0};
+	uint8_t bufferConvertido[32];
+	size_t lenConvertido = 0;
+
+	// 1. Parser ASCII -> Binário
+	for (size_t i = 0; i < lengthRaw; i += 2)
+	{
+		if (i + 1 >= lengthRaw)
+			break;
+		if (bufferRaw[i] == '\r' || bufferRaw[i] == '\n')
+			break;
+
+		uint8_t byteVal = (charParaByte(bufferRaw[i]) << 4) | charParaByte(bufferRaw[i + 1]);
+		bufferConvertido[lenConvertido++] = byteVal;
+	}
+
+	// 2. Validação
+	if (lenConvertido < 3)
+		return resp;
+
+	if (verificarCRC(bufferConvertido, lenConvertido))
+	{
+		resp.crcValido = true;
+		if (lenConvertido >= 2)
+		{
+			resp.comando = bufferConvertido[0];
+			resp.status = bufferConvertido[1];
+		}
+	}
+	return resp;
+}
+
+------------------------------ FIM DE: \Protocolo.cpp ------------------------------
+
+
+==================================================
+ARQUIVO: \Protocolo.h
+==================================================
+
+#ifndef PROTOCOLO_H
+#define PROTOCOLO_H
+
+#include <Arduino.h>
+
+struct RespostaInterpretada {
+    bool crcValido;
+    uint8_t comando;
+    uint8_t status;
+};
+
+class Protocolo {
+public:
+    // Utilitários Puros
+    static uint16_t calcularCRC16(const uint8_t* data, size_t length);
+    static size_t anexarCRC(uint8_t* buffer, size_t length);
+    static bool verificarCRC(uint8_t* buffer, size_t length);
+    
+    // Helper reutilizável (Clean Code: DRY)
+    static uint8_t charParaByte(char c);
+
+    // Parser Principal
+    static RespostaInterpretada interpretarPacote(uint8_t* buffer, size_t length);
+};
+
+#endif
+
+------------------------------ FIM DE: \Protocolo.h ------------------------------
+
+
+==================================================
+ARQUIVO: \TestController.cpp
+==================================================
+
+#include "TestController.h"
+#include "Protocolo.h"
+
+TestController::TestController(JigaHardware &hw) : jiga(hw)
+{
+	estadoAtual = ST_MENU;
+	opcaoMenu = 0;
+	passoLed = 0;
+	flagEntradaEstado = false;
+}
+
+void TestController::begin()
+{
+	jiga.mostrarTelaMensagem(F("INICIANDO SISTEMA..."), F("Jiga CCPS - v3.0"), F("Carregando..."), F(""));
+	delay(1000);
+	estadoAtual = ST_MENU;
+}
+
+void TestController::run()
+{
+	Tecla t = jiga.lerTeclado();
+	LeituraSensores s = jiga.lerTudo();
+
+	if (jiga.checarResetEmergencia())
+		resetarSistema();
+
+	switch (estadoAtual)
+	{
+	case ST_MENU:
+		handleMenu(t);
+		break;
+	case ST_MANUAL:
+		handleManual(t, s);
+		break;
+	// INSERI O TESTE AMS AQUI NA SEQUÊNCIA LÓGICA (OPCIONAL)
+	// Se quiser que ele seja o primeiro, mude o ST_INIT_TEST para chamar ele.
+	case ST_INIT_TEST:
+		handleInitTest();
+		break;
+
+		// Vamos supor que você chame o amsTest em algum lugar,
+		// ou crie um estado ST_AMS_TEST no enum (precisa atualizar o .h se fizer isso).
+		// Por enquanto, deixei a função implementada abaixo, você só precisa chamar ela.
+
+	case ST_COM_UART:
+		handleComUart();
+		break;
+	case ST_POWER_CHECK:
+		handlePowerCheck(s);
+		break;
+	case ST_POWER_TEST:
+		handlePowerTest(t, s);
+		break;
+	case ST_LED_PREP:
+		handleLedPrep(s);
+		break;
+	case ST_LED_TEST:
+		handleLedTest(t, s);
+		break;
+	case ST_APROVADO:
+		handleAprovado(t);
+		break;
+	case ST_REPROVADO:
+		handleReprovado(t);
+		break;
+	}
+}
+
+// --- IMPLEMENTAÇÃO DOS ESTADOS ---
+
+void TestController::handleMenu(Tecla t)
+{
+	static int menuAnterior = -1;
+
+	if (opcaoMenu != menuAnterior || t != NENHUMA || !flagEntradaEstado)
+	{
+		// Menu Principal
+		jiga.mostrarTelaMensagem("--- MENU INICIAL ---",
+					 (opcaoMenu == 0) ? "> 1. TESTE AUTO" : "  1. TESTE AUTO",
+					 (opcaoMenu == 1) ? "> 2. MODO MANUAL" : "  2. MODO MANUAL",
+					 "NAV:UP/DN  ENTER:DIR");
+		menuAnterior = opcaoMenu;
+		flagEntradaEstado = true;
+	}
+
+	if (t == TECLA_CIMA)
+	{
+		opcaoMenu = 0;
+		jiga.beep();
+	}
+	if (t == TECLA_BAIXO)
+	{
+		opcaoMenu = 1;
+		jiga.beep();
+	}
+	if (t == TECLA_ENTER)
+	{
+		jiga.beepSucesso();
+		flagEntradaEstado = false;
+		// SELEÇÃO: Para onde vai?
+		// Se quiser testar o AMS agora, mude o destino aqui ou dentro do ST_INIT_TEST
+		estadoAtual = (opcaoMenu == 0) ? ST_INIT_TEST : ST_AMS_TEST;
+	}
+}
+
+void TestController::handleManual(Tecla t, LeituraSensores &s)
+{
+	static bool cargaLigada = false;
+	static unsigned long tUpdate = 0;
+
+	if (!flagEntradaEstado)
+	{
+		jiga.mostrarTelaMensagem(F("MODO MANUAL"), F("Inicializando..."), F(""), F(""));
+		jiga.setPWM(150);
+		cargaLigada = false;
+		flagEntradaEstado = true;
+	}
+
+	if (t == TECLA_CIMA)
+	{
+		jiga.setPWM(jiga.getPWM() - 5);
+		jiga.beep();
+	}
+	if (t == TECLA_BAIXO)
+	{
+		jiga.setPWM(jiga.getPWM() + 5);
+		jiga.beep();
+	}
+	if (t == TECLA_ENTER)
+	{
+		cargaLigada = !cargaLigada;
+		jiga.setCarga(cargaLigada);
+		jiga.beepSucesso();
+	}
+	if (t == TECLA_ESC)
+	{
+		jiga.desligarTudo();
+		jiga.setPWM(255);
+		estadoAtual = ST_MENU;
+		flagEntradaEstado = false;
+	}
+
+	if (millis() - tUpdate > 200)
+	{
+		char l1[21], l2[21], l3[21];
+		sprintf(l1, "MANUAL PWM:%d", jiga.getPWM());
+		char vLoadStr[6], vCapStr[6];
+		dtostrf(s.vLoad, 4, 1, vLoadStr);
+		dtostrf(s.vCap, 4, 1, vCapStr);
+
+		sprintf(l2, "V_OUT: %sV %s", vLoadStr, cargaLigada ? "ON " : "OFF");
+		sprintf(l3, "V_CAP: %sV", vCapStr);
+
+		jiga.mostrarTelaMensagem(l1, l2, l3, "ESC p/ Sair");
+		tUpdate = millis();
+	}
+}
+
+void TestController::handleInitTest()
+{
+	jiga.desligarTudo();
+	jiga.setPWM(150);
+	jiga.mostrarTelaMensagem(F("INICIANDO TESTES..."), F("Aguarde..."), F(""), F(""));
+	delay(1000);
+	flagEntradaEstado = false;
+
+	// AQUI VOCÊ DECIDE A ORDEM:
+	// Se quiser rodar o AMS TEST antes da Serial, mude para o estado do AMS (se criado)
+	// ou chame a função se estiver usando lógica sequencial sem estado próprio.
+	estadoAtual = ST_COM_UART;
+}
+
+void TestController::handleComUart()
+{
+	static bool enviado = false;
+
+	if (!flagEntradaEstado)
+	{
+		jiga.limparTela();
+		jiga.mostrarTelaMensagem(F("1. TESTE SERIAL"), F("Conectando..."), F("Binario + CRC"), F(""));
+		jiga.controlarAlvo(true);
+		jiga.desligarTudo();
+		jiga.setVbat(true);
+		jiga.setCarga(false);
+		jiga.limparBufferUART();
+		timerEstado = millis();
+		enviado = false;
+		flagEntradaEstado = true;
+	}
+
+	if (!enviado && millis() - timerEstado > 1000)
+	{
+		uint8_t pacote[10];
+		pacote[0] = 0x04;
+		pacote[1] = 0x81;
+		size_t len = Protocolo::anexarCRC(pacote, 2);
+		jiga.enviarBytesComoASCII(pacote, len);
+		enviado = true;
+		timerEstado = millis();
+	}
+
+	if (enviado)
+	{
+		if (jiga.lerPacoteBinario())
+		{
+			uint8_t *bufRaw = jiga.getBufferBytes();
+			size_t tamRaw = jiga.getTamanhoBuffer();
+			RespostaInterpretada resp = Protocolo::interpretarPacote(bufRaw, tamRaw);
+
+			if (resp.crcValido)
+			{
+				uint8_t dados[32];
+				int idx = 0;
+
+				for (size_t i = 0; i < tamRaw; i += 2)
+				{
+					if (i + 1 >= tamRaw || idx >= 32)
+						break;
+					uint8_t h = Protocolo::charParaByte(bufRaw[i]);
+					uint8_t l = Protocolo::charParaByte(bufRaw[i + 1]);
+					dados[idx++] = (h << 4) | l;
+				}
+
+				uint8_t fwVersion = dados[2];
+				uint16_t vFonte = (dados[7] << 8) | dados[8];
+				uint16_t vBat = (dados[9] << 8) | dados[10];
+
+				if (fwVersion == 0x04 && (resp.status == 0x81 || resp.status == 0x15))
+				{
+					char msgFonte[21], msgBat[21];
+					sprintf(msgFonte, "V.Fonte: %d", vFonte);
+					sprintf(msgBat, "V.Bat:   %d", vBat);
+					jiga.mostrarTelaMensagem(F("PLACA COMPATIVEL"), F("FW: v04 Detectado"), msgFonte, msgBat);
+
+					jiga.beepSucesso();
+					delay(3000);
+					flagEntradaEstado = false;
+					estadoAtual = ST_POWER_CHECK;
+				}
+				else
+				{
+					char msgErro[21];
+					sprintf(msgErro, "Lido: v%02X", fwVersion);
+					jiga.mostrarTelaMensagem(F("ERRO VERSAO FW"), F("Esperado: v04"), msgErro, "Falha Serial");
+					jiga.beepErro();
+					delay(3000);
+					estadoAtual = ST_REPROVADO;
+				}
+			}
+			else
+			{
+				jiga.mostrarTelaMensagem(F("ERRO CRC"), F("Dados Corrompidos"), F(""), F(""));
+				jiga.beepErro();
+				estadoAtual = ST_REPROVADO;
+			}
+		}
+		if (millis() - timerEstado > 5000)
+		{
+			jiga.mostrarTelaMensagem(F("TIMEOUT"), F("Sem resposta"), F(""), F(""));
+			jiga.beepErro();
+			flagEntradaEstado = false;
+			estadoAtual = ST_REPROVADO;
+		}
+	}
+}
+
+void TestController::handlePowerCheck(LeituraSensores &s)
+{
+	if (!flagEntradaEstado)
+	{
+		timerEstado = millis();
+		flagEntradaEstado = true;
+	}
+
+	char lido[10], msg[21];
+	dtostrf(s.vLoad, 4, 1, lido);
+	sprintf(msg, "LIDO: %s V", lido);
+
+	jiga.mostrarTelaMensagem(F("2. POWER CHECK"), F("Alvo: 12.0V"), msg, "Ajustando...");
+
+	if (jiga.ajustarTensaoAutomatico(12.0, s.vLoad))
+	{
+		jiga.beep();
+		jiga.setCarga(true);
+		flagEntradaEstado = false;
+		estadoAtual = ST_POWER_TEST;
+	}
+
+	if (millis() - timerEstado > 15000)
+	{
+		jiga.mostrarTelaMensagem(F("ERRO: TIMEOUT"), F("Fonte instavel"), F(""), F(""));
+		estadoAtual = ST_REPROVADO;
+	}
+	delay(20);
+}
+
+void TestController::handlePowerTest(Tecla t, LeituraSensores &s)
+{
+	static unsigned long tUpdateDisplay = 0;
+
+	if (!flagEntradaEstado)
+	{
+		timerEstado = millis();
+		tUpdateDisplay = 0;
+		jiga.limparTela();
+		jiga.mostrarTelaMensagem(F("2. ALIMENTACAO"), F("LED POWER ACESO?"), F("VCap:      V"), F("DIR >> CONFIRMA"));
+		flagEntradaEstado = true;
+	}
+
+	if (millis() - tUpdateDisplay > 200)
+	{
+		char vCapStr[10];
+		dtostrf(s.vCap, 4, 1, vCapStr);
+		jiga.atualizarParteTela(2, 6, vCapStr);
+		tUpdateDisplay = millis();
+	}
+
+	if (s.vCap < 5.0 && (millis() - timerEstado > 2000))
+	{
+		jiga.setCarga(false);
+		jiga.mostrarTelaMensagem(F("FALHA: CAPACITOR"), F("Tensao baixa"), F(""), F(""));
+		jiga.beepErro();
+		estadoAtual = ST_REPROVADO;
+	}
+
+	if (t == TECLA_ENTER)
+	{
+		jiga.beep();
+		jiga.setCarga(false);
+		passoLed = 0;
+		flagEntradaEstado = false;
+		estadoAtual = ST_LED_PREP;
+	}
+}
+
+// --- AQUI ESTÁ A FUNÇÃO AMS TEST (ÚNICA DEFINIÇÃO) ---
+void TestController::amsTest(Tecla t, LeituraSensores &s)
+{
+	// Enum interno para controlar o fluxo
+	enum SubEstadoAMS
+	{
+		AMS_INIT,
+		AMS_RAMP_20V,
+		AMS_CHECK_20V,
+		AMS_RAMP_25V,
+		AMS_HOLD_25V,
+		AMS_PASS,
+		AMS_FAIL
+	};
+	static SubEstadoAMS subState = AMS_INIT;
+	static unsigned long tTimer = 0;
+	static unsigned long tUpdateDisplay = 0;
+
+	if (!flagEntradaEstado)
+	{
+		jiga.desligarTudo();
+		jiga.limparTela();
+		jiga.mostrarTelaMensagem(F("TESTE DO AMS"), F("PREPARE-SE..."), F("Nao mexa na placa"), F(""));
+		delay(1000);
+		subState = AMS_INIT;
+		flagEntradaEstado = true;
+	}
+
+	if (t == TECLA_ESC)
+	{
+		jiga.desligarTudo();
+		jiga.setPWM(255);
+		jiga.mostrarTelaMensagem(F("TESTE ABORTADO"), F("Seguranca ativada"), F(""), F(""));
+		jiga.beepErro();
+		delay(1000);
+		flagEntradaEstado = false;
+		estadoAtual = ST_MENU;
+		return;
+	}
+
+	switch (subState)
+	{
+	case AMS_INIT:
+		jiga.setVbat(true);
+		subState = AMS_RAMP_20V;
+		break;
+
+	case AMS_RAMP_20V:
+		if (millis() - tUpdateDisplay > 200)
+		{
+			char msg[21];
+			sprintf(msg, "Alvo: 20V  At: %d.%d", (int)s.vLoad, (int)(s.vLoad * 10) % 10);
+			jiga.mostrarTelaMensagem(F("ETAPA 1: VERIFICAR"), F("Subindo p/ 20V..."), msg, F(""));
+			tUpdateDisplay = millis();
+		}
+		// Usa constante correta V_AMS_CHECK (20.0) definida no Config.h
+		if (jiga.ajustarTensaoAutomatico(V_AMS_CHECK, s.vLoad))
+		{
+			tTimer = millis();
+			subState = AMS_CHECK_20V;
+		}
+		break;
+
+	case AMS_CHECK_20V:
+		jiga.ajustarTensaoAutomatico(V_AMS_CHECK, s.vLoad);
+		if (millis() - tTimer > 1000)
+		{
+			// Usa constantes V_3V3_MIN e MAX
+			if (s.v3v3 >= V_3V3_MIN && s.v3v3 <= V_3V3_MAX)
+			{
+				jiga.beepSucesso();
+				subState = AMS_RAMP_25V;
+			}
+			else
+			{
+				subState = AMS_FAIL;
+			}
+		}
+		break;
+
+	case AMS_RAMP_25V:
+		if (millis() - tUpdateDisplay > 200)
+		{
+			char msg[21];
+			sprintf(msg, "Alvo: 25V  At: %d.%d", (int)s.vLoad, (int)(s.vLoad * 10) % 10);
+			jiga.mostrarTelaMensagem(F("ETAPA 2: STRESS"), F("Subindo p/ 25V..."), msg, F("ATENCAO!"));
+			tUpdateDisplay = millis();
+		}
+		if (jiga.ajustarTensaoAutomatico(V_AMS_STRESS, s.vLoad))
+		{
+			tTimer = millis();
+			subState = AMS_HOLD_25V;
+		}
+		break;
+
+	case AMS_HOLD_25V:
+		jiga.ajustarTensaoAutomatico(V_AMS_STRESS, s.vLoad);
+		if (s.v3v3 < V_3V3_MIN || s.v3v3 > V_3V3_MAX)
+		{
+			subState = AMS_FAIL;
+			return;
+		}
+		if (millis() - tUpdateDisplay > 200)
+		{
+			int restantes = 5 - (millis() - tTimer) / 1000;
+			char msg[21];
+			sprintf(msg, "Segure: %ds", restantes);
+			char msgV33[21];
+			dtostrf(s.v3v3, 4, 2, msgV33);
+			char msgLinha4[21];
+			sprintf(msgLinha4, "3V3: %sV (OK)", msgV33);
+			jiga.mostrarTelaMensagem(F("TESTE DESTRUTIVO"), F("Aplicando 25V..."), msg, msgLinha4);
+			tUpdateDisplay = millis();
+		}
+		if (millis() - tTimer > 5000)
+		{
+			subState = AMS_PASS;
+		}
+		break;
+
+	case AMS_PASS:
+		jiga.desligarTudo();
+		jiga.setPWM(255);
+		if (millis() - tUpdateDisplay > 1000)
+		{
+			jiga.mostrarTelaMensagem(F("AMS ORIGINAL"), F("APROVADO (25V OK)"), F("Regulador Robusto"), F("ENTER p/ Proximo"));
+			jiga.tocarMelodiaVitoria();
+			tUpdateDisplay = millis();
+		}
+		if (t == TECLA_ENTER)
+		{
+			flagEntradaEstado = false;
+			estadoAtual = ST_INIT_TEST;
+		}
+		break;
+
+	case AMS_FAIL:
+		jiga.desligarTudo();
+		jiga.setPWM(255);
+		jiga.mostrarTelaMensagem(F("FALHA: AMS PIRATA"), F("Trocar Imediato!"), F("Nao aguentou carga"), F("PRESSIONE BOTAO"));
+		jiga.beepErro();
+		delay(500);
+		if (t != NENHUMA)
+		{
+			flagEntradaEstado = false;
+			estadoAtual = ST_REPROVADO;
+		}
+		break;
+	}
+}
+
+void TestController::handleLedPrep(LeituraSensores &s)
+{
+	jiga.setVbat(true);
+	char alvoStr[10], msg[21];
+	dtostrf(listaTensoes[passoLed], 4, 1, alvoStr);
+	sprintf(msg, "Alvo: %sV", alvoStr);
+
+	jiga.mostrarTelaMensagem(F("3. AJUSTE LEDS"), msg, "Aguarde...", "");
+
+	if (jiga.ajustarTensaoAutomatico(listaTensoes[passoLed], s.vLoad))
+	{
+		flagEntradaEstado = false;
+		estadoAtual = ST_LED_TEST;
+	}
+	delay(15);
+}
+
+void TestController::handleLedTest(Tecla t, LeituraSensores &s)
+{
+	static unsigned long tUpdateDisplay = 0;
+	static int passoAnterior = -1;
+
+	jiga.ajustarTensaoAutomatico(listaTensoes[passoLed], s.vLoad);
+
+	if (!flagEntradaEstado || passoLed != passoAnterior)
+	{
+		jiga.limparTela();
+		jiga.mostrarTelaMensagem(F("3. TESTE LEDS"), listaMsgs[passoLed], "V-JIGA:      V", "DIR >> CONFIRMA");
+		passoAnterior = passoLed;
+		flagEntradaEstado = true;
+		tUpdateDisplay = 0;
+	}
+
+	if (millis() - tUpdateDisplay > 200)
+	{
+		char atualStr[10];
+		dtostrf(s.vLoad, 4, 2, atualStr);
+		jiga.atualizarParteTela(2, 8, atualStr);
+		tUpdateDisplay = millis();
+	}
+
+	if (t == TECLA_ENTER)
+	{
+		jiga.beep();
+		passoLed++;
+		if (passoLed >= TOTAL_PASSOS_LED)
+		{
+			flagEntradaEstado = false;
+			estadoAtual = ST_APROVADO;
+		}
+		else
+		{
+			delay(200);
+		}
+	}
+}
+
+void TestController::handleAprovado(Tecla t)
+{
+	if (!flagEntradaEstado)
+	{
+		jiga.desligarTudo();
+		jiga.setPWM(255);
+		jiga.mostrarTelaMensagem(F("   >>> APROVADO <<< "), F("  Placa OK! Remova. "), F("ENTER: Novo Teste"), F("ESC:   Menu Inicial"));
+		jiga.tocarMelodiaVitoria();
+		flagEntradaEstado = true;
+	}
+
+	if (t == TECLA_ENTER)
+	{
+		jiga.beepSucesso();
+		flagEntradaEstado = false;
+		estadoAtual = ST_INIT_TEST;
+	}
+	if (t == TECLA_ESC)
+	{
+		jiga.beep();
+		flagEntradaEstado = false;
+		estadoAtual = ST_MENU;
+	}
+}
+
+void TestController::handleReprovado(Tecla t)
+{
+	if (!flagEntradaEstado)
+	{
+		jiga.desligarTudo();
+		jiga.setPWM(255);
+		jiga.mostrarTelaMensagem(F("   >>> FALHA <<<   "), F("Tente Novamente"), F("PRESSIONE QUALQUER"), F("BOTAO PARA SAIR"));
+		jiga.tocarMelodiaDerrota();
+		flagEntradaEstado = true;
+	}
+	if (t != NENHUMA)
+	{
+		jiga.beep();
+		flagEntradaEstado = false;
+		estadoAtual = ST_INIT_TEST;
+	}
+}
+
+void TestController::resetarSistema()
+{
+	jiga.limparTela();
+	jiga.mostrarTelaMensagem(F("   RESET GLOBAL   "), F("Reiniciando..."), F(""), F(""));
+	delay(1000);
+	void (*resetarArduino)(void) = 0;
+	resetarArduino();
+}
+
+------------------------------ FIM DE: \TestController.cpp ------------------------------
+
+
+==================================================
+ARQUIVO: \TestController.h
+==================================================
+
+#ifndef TESTCONTROLLER_H
+#define TESTCONTROLLER_H
+
+#include "JigaHardware.h"
+
+enum EstadoSistema
+{
+	ST_MENU,
+	ST_MANUAL,
+	ST_AMS_TEST,
+	ST_INIT_TEST,
+	ST_COM_UART,
+	ST_POWER_CHECK,
+	ST_POWER_TEST,
+	ST_LED_PREP,
+	ST_LED_TEST,
+	ST_APROVADO,
+	ST_REPROVADO
+};
+
+class TestController
+{
+private:
+	JigaHardware &jiga;
+	EstadoSistema estadoAtual;
+
+	// Variáveis de fluxo
+	unsigned long timerEstado;
+	int opcaoMenu;
+	int passoLed;
+	bool flagEntradaEstado;
+
+	// Configuração de Testes
+	static const int TOTAL_PASSOS_LED = 7;
+	const float listaTensoes[7] = {
+	    V_TEST_UNDER, V_TEST_0_25, V_TEST_25_50, V_TEST_50_75,
+	    V_TEST_75_100, V_TEST_OVER, V_TEST_CRITICAL};
+	const char *listaMsgs[7] = {
+	    "LEDS APAGADOS?", "VM PISCA (0-25)?", "VM ACESO (25-50)?",
+	    "VD PISCA (50-75)?", "VD ACESO (100%)?", "PISCA ALTERNADO?", "PISCA JUNTOS?"};
+
+	// Handlers de Estado
+	void handleMenu(Tecla t);
+	void handleManual(Tecla t, LeituraSensores &s);
+	void amsTest(Tecla t, LeituraSensores &s);
+	void handleInitTest();
+	void handleComUart();
+	void handlePowerCheck(LeituraSensores &s);
+	void handlePowerTest(Tecla t, LeituraSensores &s);
+	void handleLedPrep(LeituraSensores &s);
+	void handleLedTest(Tecla t, LeituraSensores &s);
+	void handleAprovado(Tecla t);
+	void handleReprovado(Tecla t);
+
+	void resetarSistema();
+
+public:
+	TestController(JigaHardware &hw);
+	void begin();
+	void run();
+};
+
+#endif
+
+------------------------------ FIM DE: \TestController.h ------------------------------
+
