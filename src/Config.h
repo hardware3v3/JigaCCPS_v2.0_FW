@@ -65,7 +65,7 @@ const float V_TEST_UNDER = 11.5;
 const float V_TEST_0_25 = 12.2;
 const float V_TEST_25_50 = 12.8;
 const float V_TEST_50_75 = 13.4;
-const float V_TEST_75_100 = 13.8;
+const float V_TEST_75_100 = 13.9;
 const float V_TEST_OVER = 14.4;
 const float V_TEST_CRITICAL = 18.0;
 

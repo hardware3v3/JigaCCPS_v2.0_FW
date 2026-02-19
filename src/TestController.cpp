@@ -114,28 +114,260 @@ void TestController::handleMenu(Tecla t)
 			opcaoMenu = 2;
 		jiga.beep();
 	}
-
-	// Seleção
 	if (t == TECLA_ENTER)
 	{
 		jiga.beepSucesso();
 		flagEntradaEstado = false;
 
 		if (opcaoMenu == 0)
-			estadoAtual = ST_AMS_TEST; // Teste AMS/Pirata
-						   // estadoAtual = ST_INIT_TEST; // Teste Normal
+		{
+			habilitarTesteCCPS = true; // A opção 0 testa placas COM CCPS
+			estadoAtual = ST_AMS_TEST;
+		}
 		else if (opcaoMenu == 1)
-			estadoAtual = ST_INIT_TEST; // Manual
+		{
+			habilitarTesteCCPS = false; // A opção 1 testa placas SEM CCPS
+			estadoAtual = ST_INIT_TEST; // Vai pro mesmo teste, mas pulando a etapa!
+		}
 		else if (opcaoMenu == 2)
-			estadoAtual = ST_MANUAL; // Manual
-						 // estadoAtual = ST_AMS_TEST; // Teste AMS/Pirata
-						 //    estadoAtual = ST_INIT_TEST; // Teste Normal
+		{
+			habilitarTesteCCPS = false; // A opção 1 testa placas SEM CCPS
+			estadoAtual = ST_MANUAL;    // Vai pro mesmo teste, mas pulando a etapa!
+		}
 	}
 }
 
+// void TestController::amsTest(Tecla t, LeituraSensores &s)
+// {
+// 	// Enum interno atualizado com erro de Curto
+// 	enum SubEstadoAMS
+// 	{
+// 		AMS_INIT,
+// 		AMS_RAMP_20V,
+// 		AMS_CHECK_20V,
+// 		AMS_RAMP_25V,
+// 		AMS_HOLD_25V,
+// 		AMS_PASS,
+// 		AMS_FAIL_PIRATE, // Erro de tensão 3v3 (Pirata)
+// 		AMS_FAIL_SHORT	 // Erro de Rampa (Curto/Sobrecarga)
+// 	};
+
+// 	static SubEstadoAMS subState = AMS_INIT;
+// 	static unsigned long tTimer = 0; // Usado para Timeout da Rampa E para Contagem de 5s
+// 	static unsigned long tUpdateDisplay = 0;
+// 	static bool erroMostrado = false;
+
+// 	// --- SETUP INICIAL ---
+// 	if (!flagEntradaEstado)
+// 	{
+// 		jiga.desligarTudo();
+// 		jiga.limparTela();
+// 		jiga.mostrarTelaMensagem(F("TESTE DO AMS"), F("PREPARE-SE..."), F("Nao mexa na placa"), F(""));
+// 		delay(1000);
+
+// 		subState = AMS_INIT;
+// 		erroMostrado = false;
+// 		flagEntradaEstado = true;
+// 	}
+
+// 	// --- BOTÃO DE PÂNICO ---
+// 	if (t == TECLA_ESC)
+// 	{
+// 		jiga.desligarTudo();
+// 		jiga.setPWM(255);
+// 		jiga.mostrarTelaMensagem(F("TESTE ABORTADO"), F("Seguranca ativada"), F(""), F(""));
+// 		jiga.beepErro();
+// 		delay(1000);
+// 		flagEntradaEstado = false;
+// 		estadoAtual = ST_MENU;
+// 		return;
+// 	}
+
+// 	switch (subState)
+// 	{
+// 	case AMS_INIT:
+// 		jiga.setVbat(true);	  // Habilita entrada de tensão
+// 		jiga.controlarAlvo(true); // Habilita a placa (opcional, dependendo do seu circuito)
+
+// 		tTimer = millis(); // <--- INICIA O CRONÔMETRO PARA A RAMPA DE 20V
+// 		subState = AMS_RAMP_20V;
+// 		break;
+
+// 	case AMS_RAMP_20V:
+// 		// 1. Atualiza Display
+// 		if (millis() - tUpdateDisplay > 200)
+// 		{
+// 			char msg[21];
+// 			sprintf(msg, "Alvo: 20V  At: %d.%d", (int)s.vLoad, (int)(s.vLoad * 10) % 10);
+// 			jiga.mostrarTelaMensagem(F("ETAPA 1: SUBINDO"), F("Buscando 20V..."), msg, F(""));
+// 			tUpdateDisplay = millis();
+// 		}
+
+// 		// 2. Proteção de Timeout (Curto-circuito)
+// 		if (millis() - tTimer > 2000) // Se passar de 2 segundos tentando subir
+// 		{
+// 			subState = AMS_FAIL_SHORT; // ABORTA
+// 			return;
+// 		}
+
+// 		// 3. Tenta Ajustar
+// 		if (jiga.ajustarTensaoAutomatico(V_AMS_CHECK, s.vLoad))
+// 		{
+// 			// Chegou em 20V!
+// 			tTimer = millis(); // Reseta timer para usar no próximo estado (Estabilização)
+// 			subState = AMS_CHECK_20V;
+// 		}
+// 		break;
+
+// 	case AMS_CHECK_20V:
+// 		jiga.ajustarTensaoAutomatico(V_AMS_CHECK, s.vLoad);
+
+// 		// Espera 1s estabilizar
+// 		if (millis() - tTimer > 1000)
+// 		{
+// 			// Verifica o 3.3V
+// 			if (s.v3v3 >= V_3V3_MIN && s.v3v3 <= V_3V3_MAX)
+// 			{
+// 				jiga.beepSucesso();
+// 				tTimer = millis(); // <--- INICIA O CRONÔMETRO PARA A RAMPA DE 25V
+// 				subState = AMS_RAMP_25V;
+// 			}
+// 			else
+// 			{
+// 				subState = AMS_FAIL_PIRATE;
+// 			}
+// 		}
+// 		break;
+
+// 	case AMS_RAMP_25V:
+// 		// 1. Atualiza Display
+// 		if (millis() - tUpdateDisplay > 200)
+// 		{
+// 			char msg[21];
+// 			sprintf(msg, "Alvo: 25V  At: %d.%d", (int)s.vLoad, (int)(s.vLoad * 10) % 10);
+// 			jiga.mostrarTelaMensagem(F("ETAPA 2: STRESS"), F("Subindo p/ 25V..."), msg, F("ATENCAO!"));
+// 			tUpdateDisplay = millis();
+// 		}
+
+// 		// 2. Proteção de Timeout (Curto-circuito nos 25V) - AQUI É O MAIS IMPORTANTE
+// 		if (millis() - tTimer > 2000)
+// 		{
+// 			subState = AMS_FAIL_SHORT; // ABORTA SE NÃO SUBIR EM 2s
+// 			return;
+// 		}
+
+// 		// 3. Tenta Ajustar
+// 		if (jiga.ajustarTensaoAutomatico(V_AMS_STRESS, s.vLoad))
+// 		{
+// 			// Chegou em 25V!
+// 			tTimer = millis(); // Inicia timer dos 5 segundos de hold
+// 			subState = AMS_HOLD_25V;
+// 		}
+// 		break;
+
+// 	case AMS_HOLD_25V:
+// 		jiga.ajustarTensaoAutomatico(V_AMS_STRESS, s.vLoad);
+
+// 		// Monitoramento contínuo da saída 3V3
+// 		if (s.v3v3 < V_3V3_MIN || s.v3v3 > V_3V3_MAX)
+// 		{
+// 			subState = AMS_FAIL_PIRATE;
+// 			return;
+// 		}
+
+// 		if (millis() - tUpdateDisplay > 200)
+// 		{
+// 			int restantes = 5 - (millis() - tTimer) / 1000;
+// 			char msg[21];
+// 			sprintf(msg, "Segure: %ds", restantes);
+// 			char msgV33[21];
+// 			dtostrf(s.v3v3, 4, 2, msgV33);
+// 			char msgLinha4[21];
+// 			sprintf(msgLinha4, "3V3: %sV (OK)", msgV33);
+// 			jiga.mostrarTelaMensagem(F("TESTE DESTRUTIVO"), F("Aplicando 25V..."), msg, msgLinha4);
+// 			tUpdateDisplay = millis();
+// 		}
+
+// 		if (millis() - tTimer > 5000)
+// 		{
+// 			subState = AMS_PASS;
+// 		}
+// 		break;
+
+// 	case AMS_PASS:
+// 		jiga.desligarTudo();
+// 		jiga.setPWM(255);
+// 		static bool flagMusic = true;
+
+// 		if (millis() - tUpdateDisplay > 1000)
+// 		{
+
+// 			jiga.mostrarTelaMensagem(F("AMS ORIGINAL"), F("APROVADO (25V OK)"), F("Regulador Robusto"), F("ENTER p/ Continuar"));
+
+// 			if (flagMusic)
+// 			{
+// 				jiga.tocarMelodiaVitoria();
+// 				flagMusic = false;
+// 			}
+
+// 			tUpdateDisplay = millis();
+// 		}
+
+// 		if (t == TECLA_ENTER)
+// 		{
+// 			flagMusic = true;
+// 			flagEntradaEstado = false;
+// 			estadoAtual = ST_INIT_TEST;
+// 		}
+// 		break;
+
+// 	// --- CASO 1: TENSÃO SUBIU, MAS REGULADOR FALHOU (PIRATA) ---
+// 	case AMS_FAIL_PIRATE:
+// 		if (!erroMostrado)
+// 		{
+// 			jiga.desligarTudo();
+// 			jiga.setPWM(255);
+// 			jiga.mostrarTelaMensagem(F("FALHA: AMS PIRATA"), F("Trocar Imediato!"), F("Nao aguentou carga"), F("PRESSIONE BOTAO"));
+// 			jiga.beepErro();
+// 			erroMostrado = true;
+// 		}
+// 		if (t != NENHUMA)
+// 		{
+// 			flagEntradaEstado = false;
+// 			estadoAtual = ST_REPROVADO;
+// 		}
+// 		break;
+
+// 	// --- CASO 2: TENSÃO NEM SUBIU (CURTO-CIRCUITO / SOBRECARGA) ---
+// 	case AMS_FAIL_SHORT:
+// 		if (!erroMostrado)
+// 		{
+// 			// DESLIGA TUDO IMEDIATAMENTE
+// 			jiga.desligarTudo();
+// 			jiga.setPWM(255);
+
+// 			// Mensagem específica de Curto
+// 			jiga.mostrarTelaMensagem(F("FALHA GRAVE: CURTO"), F("Tensao nao subiu!"), F("Verifique a placa"), F("PRESSIONE BOTAO"));
+
+// 			// Beep longo e contínuo para alertar
+// 			jiga.beepErro();
+// 			delay(200);
+// 			jiga.beepErro();
+
+// 			erroMostrado = true;
+// 		}
+// 		if (t != NENHUMA)
+// 		{
+// 			flagEntradaEstado = false;
+// 			estadoAtual = ST_REPROVADO;
+// 		}
+// 		break;
+// 	}
+// }
+
 void TestController::amsTest(Tecla t, LeituraSensores &s)
 {
-	// Enum interno atualizado com erro de Curto
+	// Enum interno limpo (AMS_FAIL_SHORT foi removido, o Watchdog trata disso!)
 	enum SubEstadoAMS
 	{
 		AMS_INIT,
@@ -144,16 +376,16 @@ void TestController::amsTest(Tecla t, LeituraSensores &s)
 		AMS_RAMP_25V,
 		AMS_HOLD_25V,
 		AMS_PASS,
-		AMS_FAIL_PIRATE, // Erro de tensão 3v3 (Pirata)
-		AMS_FAIL_SHORT	 // Erro de Rampa (Curto/Sobrecarga)
+		AMS_FAIL_PIRATE
 	};
 
 	static SubEstadoAMS subState = AMS_INIT;
-	static unsigned long tTimer = 0; // Usado para Timeout da Rampa E para Contagem de 5s
+	static unsigned long tTimer = 0;
 	static unsigned long tUpdateDisplay = 0;
-	static bool erroMostrado = false;
 
-	// --- SETUP INICIAL ---
+	static bool erroMostrado = false;
+	static bool musicaTocada = false;
+
 	if (!flagEntradaEstado)
 	{
 		jiga.desligarTudo();
@@ -163,10 +395,10 @@ void TestController::amsTest(Tecla t, LeituraSensores &s)
 
 		subState = AMS_INIT;
 		erroMostrado = false;
+		musicaTocada = false;
 		flagEntradaEstado = true;
 	}
 
-	// --- BOTÃO DE PÂNICO ---
 	if (t == TECLA_ESC)
 	{
 		jiga.desligarTudo();
@@ -182,15 +414,12 @@ void TestController::amsTest(Tecla t, LeituraSensores &s)
 	switch (subState)
 	{
 	case AMS_INIT:
-		jiga.setVbat(true);	  // Habilita entrada de tensão
-		jiga.controlarAlvo(true); // Habilita a placa (opcional, dependendo do seu circuito)
-
-		tTimer = millis(); // <--- INICIA O CRONÔMETRO PARA A RAMPA DE 20V
+		jiga.setVbat(true);
+		jiga.controlarAlvo(true);
 		subState = AMS_RAMP_20V;
 		break;
 
 	case AMS_RAMP_20V:
-		// 1. Atualiza Display
 		if (millis() - tUpdateDisplay > 200)
 		{
 			char msg[21];
@@ -199,33 +428,35 @@ void TestController::amsTest(Tecla t, LeituraSensores &s)
 			tUpdateDisplay = millis();
 		}
 
-		// 2. Proteção de Timeout (Curto-circuito)
-		if (millis() - tTimer > 2000) // Se passar de 2 segundos tentando subir
+		// --- GUARDA-COSTAS (WATCHDOG) ---
+		if (verificarCurtoCircuito(V_AMS_CHECK, s.vLoad))
 		{
-			subState = AMS_FAIL_SHORT; // ABORTA
+			dispararErroCurto();
 			return;
 		}
 
-		// 3. Tenta Ajustar
 		if (jiga.ajustarTensaoAutomatico(V_AMS_CHECK, s.vLoad))
 		{
-			// Chegou em 20V!
-			tTimer = millis(); // Reseta timer para usar no próximo estado (Estabilização)
+			tTimer = millis();
 			subState = AMS_CHECK_20V;
 		}
 		break;
 
 	case AMS_CHECK_20V:
+		// --- GUARDA-COSTAS (WATCHDOG) ---
+		if (verificarCurtoCircuito(V_AMS_CHECK, s.vLoad))
+		{
+			dispararErroCurto();
+			return;
+		}
+
 		jiga.ajustarTensaoAutomatico(V_AMS_CHECK, s.vLoad);
 
-		// Espera 1s estabilizar
 		if (millis() - tTimer > 1000)
 		{
-			// Verifica o 3.3V
 			if (s.v3v3 >= V_3V3_MIN && s.v3v3 <= V_3V3_MAX)
 			{
 				jiga.beepSucesso();
-				tTimer = millis(); // <--- INICIA O CRONÔMETRO PARA A RAMPA DE 25V
 				subState = AMS_RAMP_25V;
 			}
 			else
@@ -236,7 +467,6 @@ void TestController::amsTest(Tecla t, LeituraSensores &s)
 		break;
 
 	case AMS_RAMP_25V:
-		// 1. Atualiza Display
 		if (millis() - tUpdateDisplay > 200)
 		{
 			char msg[21];
@@ -245,26 +475,30 @@ void TestController::amsTest(Tecla t, LeituraSensores &s)
 			tUpdateDisplay = millis();
 		}
 
-		// 2. Proteção de Timeout (Curto-circuito nos 25V) - AQUI É O MAIS IMPORTANTE
-		if (millis() - tTimer > 2000)
+		// --- GUARDA-COSTAS (WATCHDOG) ---
+		if (verificarCurtoCircuito(V_AMS_STRESS, s.vLoad))
 		{
-			subState = AMS_FAIL_SHORT; // ABORTA SE NÃO SUBIR EM 2s
+			dispararErroCurto();
 			return;
 		}
 
-		// 3. Tenta Ajustar
 		if (jiga.ajustarTensaoAutomatico(V_AMS_STRESS, s.vLoad))
 		{
-			// Chegou em 25V!
-			tTimer = millis(); // Inicia timer dos 5 segundos de hold
+			tTimer = millis();
 			subState = AMS_HOLD_25V;
 		}
 		break;
 
 	case AMS_HOLD_25V:
+		// --- GUARDA-COSTAS (WATCHDOG) ---
+		if (verificarCurtoCircuito(V_AMS_STRESS, s.vLoad))
+		{
+			dispararErroCurto();
+			return;
+		}
+
 		jiga.ajustarTensaoAutomatico(V_AMS_STRESS, s.vLoad);
 
-		// Monitoramento contínuo da saída 3V3
 		if (s.v3v3 < V_3V3_MIN || s.v3v3 > V_3V3_MAX)
 		{
 			subState = AMS_FAIL_PIRATE;
@@ -275,11 +509,12 @@ void TestController::amsTest(Tecla t, LeituraSensores &s)
 		{
 			int restantes = 5 - (millis() - tTimer) / 1000;
 			char msg[21];
-			sprintf(msg, "Segure: %ds", restantes);
+			sprintf(msg, "Espere: %ds", restantes);
 			char msgV33[21];
 			dtostrf(s.v3v3, 4, 2, msgV33);
 			char msgLinha4[21];
 			sprintf(msgLinha4, "3V3: %sV (OK)", msgV33);
+
 			jiga.mostrarTelaMensagem(F("TESTE DESTRUTIVO"), F("Aplicando 25V..."), msg, msgLinha4);
 			tUpdateDisplay = millis();
 		}
@@ -293,31 +528,21 @@ void TestController::amsTest(Tecla t, LeituraSensores &s)
 	case AMS_PASS:
 		jiga.desligarTudo();
 		jiga.setPWM(255);
-		static bool flagMusic = true;
 
-		if (millis() - tUpdateDisplay > 1000)
+		if (!musicaTocada)
 		{
-
 			jiga.mostrarTelaMensagem(F("AMS ORIGINAL"), F("APROVADO (25V OK)"), F("Regulador Robusto"), F("ENTER p/ Continuar"));
-
-			if (flagMusic)
-			{
-				jiga.tocarMelodiaVitoria();
-				flagMusic = false;
-			}
-
-			tUpdateDisplay = millis();
+			jiga.tocarMelodiaVitoria();
+			musicaTocada = true;
 		}
 
 		if (t == TECLA_ENTER)
 		{
-			flagMusic = true;
 			flagEntradaEstado = false;
 			estadoAtual = ST_INIT_TEST;
 		}
 		break;
 
-	// --- CASO 1: TENSÃO SUBIU, MAS REGULADOR FALHOU (PIRATA) ---
 	case AMS_FAIL_PIRATE:
 		if (!erroMostrado)
 		{
@@ -327,31 +552,7 @@ void TestController::amsTest(Tecla t, LeituraSensores &s)
 			jiga.beepErro();
 			erroMostrado = true;
 		}
-		if (t != NENHUMA)
-		{
-			flagEntradaEstado = false;
-			estadoAtual = ST_REPROVADO;
-		}
-		break;
 
-	// --- CASO 2: TENSÃO NEM SUBIU (CURTO-CIRCUITO / SOBRECARGA) ---
-	case AMS_FAIL_SHORT:
-		if (!erroMostrado)
-		{
-			// DESLIGA TUDO IMEDIATAMENTE
-			jiga.desligarTudo();
-			jiga.setPWM(255);
-
-			// Mensagem específica de Curto
-			jiga.mostrarTelaMensagem(F("FALHA GRAVE: CURTO"), F("Tensao nao subiu!"), F("Verifique a placa"), F("PRESSIONE BOTAO"));
-
-			// Beep longo e contínuo para alertar
-			jiga.beepErro();
-			delay(200);
-			jiga.beepErro();
-
-			erroMostrado = true;
-		}
 		if (t != NENHUMA)
 		{
 			flagEntradaEstado = false;
@@ -534,7 +735,12 @@ void TestController::handlePowerCheck(LeituraSensores &s)
 	sprintf(msg, "LIDO: %s V", lido);
 
 	jiga.mostrarTelaMensagem(F("2. POWER CHECK"), F("Alvo: 12.0V"), msg, "Ajustando...");
-
+	// INJETE ESTA LINHA AQUI:
+	if (verificarCurtoCircuito(12.0, s.vLoad))
+	{
+		dispararErroCurto();
+		return;
+	}
 	if (jiga.ajustarTensaoAutomatico(12.0, s.vLoad))
 	{
 		jiga.beep();
@@ -608,6 +814,11 @@ void TestController::handleLedPrep(LeituraSensores &s)
 
 	jiga.mostrarTelaMensagem(F("3. AJUSTE LEDS"), msg, "Aguarde...", "");
 
+	if (verificarCurtoCircuito(listaTensoes[passoLed], s.vLoad))
+	{
+		dispararErroCurto();
+		return;
+	}
 	// Quando a Jiga finalmente estabilizar na tensão alvo:
 	if (jiga.ajustarTensaoAutomatico(listaTensoes[passoLed], s.vLoad))
 	{
@@ -616,7 +827,7 @@ void TestController::handleLedPrep(LeituraSensores &s)
 		// 0 = "LEDS APAGADOS?"
 		// 1 = "VM PISCA (0-25)?"
 		// 2 = "VM ACESO (25-50)?"  <-- A partir daqui faremos a checagem
-		if (passoLed >= 3 && passoLed <=5)
+		if ((passoLed > 3 && passoLed <= 5) && habilitarTesteCCPS)
 		{
 			Serial.println("Estou no if");
 			Serial.println(s.vCCPS);
@@ -633,6 +844,12 @@ void TestController::handleLedPrep(LeituraSensores &s)
 				jiga.desligarTudo();
 				jiga.mostrarTelaMensagem(F("FALHA: SAIDA PLACA"), F("Esp: 11.0V a 14.0V"), msgErro, F("PRESSIONE BOTAO"));
 				jiga.beepErro();
+
+				Serial.println("O valor de tensao lido foi:");
+				Serial.println(s.vCCPS);
+
+				// --- A MÁGICA DOS 3 SEGUNDOS ESTÁ AQUI ---
+                                delay(3000);
 
 				flagEntradaEstado = false;
 
@@ -652,7 +869,12 @@ void TestController::handleLedTest(Tecla t, LeituraSensores &s)
 {
 	static unsigned long tUpdateDisplay = 0;
 	static int passoAnterior = -1;
-
+	// INJETE ESTA LINHA AQUI:
+	if (verificarCurtoCircuito(listaTensoes[passoLed], s.vLoad))
+	{
+		dispararErroCurto();
+		return;
+	}
 	jiga.ajustarTensaoAutomatico(listaTensoes[passoLed], s.vLoad);
 
 	if (!flagEntradaEstado || passoLed != passoAnterior)
@@ -745,4 +967,48 @@ void TestController::resetarSistema()
 	delay(1000);
 	void (*resetarArduino)(void) = 0;
 	resetarArduino();
+}
+
+// ==========================================
+// SISTEMA DE SEGURANÇA CONTÍNUO (WATCHDOG)
+// ==========================================
+bool TestController::verificarCurtoCircuito(float alvo, float atual)
+{
+	// 1. Se o alvo mudou (nova etapa), reseta o timer
+	if (alvo != alvoVoutAtual)
+	{
+		alvoVoutAtual = alvo;
+		timerCurto = millis();
+	}
+
+	// 2. Se a tensão atual está a menos de 1.0V do alvo, a placa NÃO está em curto.
+	// O timer fica sendo "zerado" para o tempo atual constantemente.
+	if (abs(alvo - atual) <= 1.0)
+	{
+		timerCurto = millis();
+		return false; // Tudo OK
+	}
+
+	// 3. Se a diferença for > 1.0V de forma contínua por mais de 2 segundos (2000ms)...
+	if (millis() - timerCurto > 2000)
+	{
+		return true; // CURTO DETECTADO!
+	}
+
+	return false; // Ainda está tentando alcançar (dentro dos 2 segundos)
+}
+
+void TestController::dispararErroCurto()
+{
+	jiga.desligarTudo();
+	jiga.setPWM(255); // Zera o PWM (Corta energia)
+
+	// Mostra erro grave e reprova direto
+	jiga.mostrarTelaMensagem(F("FALHA GRAVE: CURTO"), F("Tensao fora do alvo"), F("Placa Danificada!"), F("PRESSIONE BOTAO"));
+	jiga.beepErro();
+	delay(200);
+	jiga.beepErro(); // Beep duplo para alertar o operador
+
+	flagEntradaEstado = false;
+	estadoAtual = ST_REPROVADO;
 }

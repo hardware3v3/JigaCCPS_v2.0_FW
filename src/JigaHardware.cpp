@@ -234,10 +234,10 @@ void JigaHardware::tocarMelodiaVitoria()
 void JigaHardware::tocarMelodiaDerrota()
 {
 	digitalWrite(PIN_BUZZER, HIGH);
-	delay(800);
+	delay(500);
 	digitalWrite(PIN_BUZZER, LOW);
 	delay(500);
 	digitalWrite(PIN_BUZZER, HIGH);
-	delay(1200);
+	delay(500);
 	digitalWrite(PIN_BUZZER, LOW);
 }
