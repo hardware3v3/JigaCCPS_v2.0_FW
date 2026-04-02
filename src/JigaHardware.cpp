@@ -71,6 +71,15 @@ int JigaHardware::getPWM() { return pwmAtual; }
 
 bool JigaHardware::ajustarTensaoAutomatico(float alvo, float atual)
 {
+	if (alvo > 26.0)
+	{
+		alvo = 26.0;
+	}
+	if (alvo < 0.0)
+	{
+		alvo = 0.0;
+	}
+
 	float erro = abs(atual - alvo);
 	if (erro <= TOLERANCIA_AJUSTE)
 		return true;
@@ -180,6 +189,35 @@ Tecla JigaHardware::checarBotao(int pino, Tecla id, EstadoBotao &est)
 
 Tecla JigaHardware::lerTeclado()
 {
+	// 1. Leitura via Serial (O "Teclado Virtual" do Python)
+	if (Serial.available() > 0)
+	{
+		String cmd = Serial.readStringUntil('\n'); // Lê até a quebra de linha
+		cmd.trim();				   // Remove espaços invisíveis ou \r no final
+
+		if (cmd == "ENTER" || cmd == "CMD:ENTER")
+		{
+			beep();
+			return TECLA_ENTER;
+		}
+		if (cmd == "ESC" || cmd == "CMD:ESC")
+		{
+			beep();
+			return TECLA_ESC;
+		}
+		if (cmd == "UP" || cmd == "CMD:UP")
+		{
+			beep();
+			return TECLA_CIMA;
+		}
+		if (cmd == "DOWN" || cmd == "CMD:DOWN")
+		{
+			beep();
+			return TECLA_BAIXO;
+		}
+	}
+
+	// 2. Leitura dos botões físicos originais (Mantém tudo funcionando na caixa!)
 	Tecla t;
 	if ((t = checarBotao(PIN_BTN_LEFT, TECLA_ESC, btnLeft)) != NENHUMA)
 		return t;
@@ -189,6 +227,7 @@ Tecla JigaHardware::lerTeclado()
 		return t;
 	if ((t = checarBotao(PIN_BTN_DOWN, TECLA_BAIXO, btnDown)) != NENHUMA)
 		return t;
+
 	return NENHUMA;
 }
 

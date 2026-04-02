@@ -30,9 +30,9 @@ private:
 	int passoLed;
 	bool flagEntradaEstado;
 	bool habilitarTesteCCPS; // <--- NOVA FLAG CLARA E DESCRITIVA
-	// --- VARIÁVEIS DE SEGURANÇA (NOVO) ---
-    float alvoVoutAtual;
-    unsigned long timerCurto;
+				 // --- VARIÁVEIS DE SEGURANÇA (NOVO) ---
+	float alvoVoutAtual;
+	unsigned long timerCurto;
 
 	// Configuração de Testes
 	static const int TOTAL_PASSOS_LED = 7;
@@ -57,8 +57,11 @@ private:
 	void handleReprovado(Tecla t);
 
 	// --- MÉTODOS DE SEGURANÇA (NOVO) ---
-    bool verificarCurtoCircuito(float alvo, float atual);
-    void dispararErroCurto();
+	bool verificarCurtoCircuito(float alvo, float atual);
+	void dispararErroCurto();
+
+	// --- MÉTODO DE TELEMETRIA (NOVO) ---
+	void enviarTelemetria(LeituraSensores &s); // <--- ADICIONE ESTA LINHA AQUI
 
 	void resetarSistema();
 
