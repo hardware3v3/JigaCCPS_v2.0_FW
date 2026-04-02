@@ -71,6 +71,15 @@ int JigaHardware::getPWM() { return pwmAtual; }
 
 bool JigaHardware::ajustarTensaoAutomatico(float alvo, float atual)
 {
+	if (alvo > 26.0)
+	{
+		alvo = 26.0;
+	}
+	if (alvo < 0.0)
+	{
+		alvo = 0.0;
+	}
+
 	float erro = abs(atual - alvo);
 	if (erro <= TOLERANCIA_AJUSTE)
 		return true;

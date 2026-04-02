@@ -41,11 +41,12 @@ void TestController::run()
 	case ST_INIT_TEST:
 		handleInitTest();
 		break;
-	case ST_COM_UART:
-		handleComUart();
-		break;
 	case ST_POWER_CHECK:
 		handlePowerCheck(s);
+		break;
+
+	case ST_LEITURA_UART: // <--- ADICIONE ESTAS 3 LINHAS
+		handleLeituraUart();
 		break;
 	case ST_POWER_TEST:
 		handlePowerTest(t, s);
@@ -367,266 +368,302 @@ void TestController::handleMenu(Tecla t)
 
 void TestController::amsTest(Tecla t, LeituraSensores &s)
 {
-        enum SubEstadoAMS
-        {
-                AMS_INIT,
-                AMS_RAMP_20V,
-                AMS_CHECK_20V,
-                AMS_RAMP_25V,
-                AMS_HOLD_25V,
-                AMS_PASS,
-                AMS_FAIL_PIRATE,
-                AMS_FAIL_POWER 
-        };
+	enum SubEstadoAMS
+	{
+		AMS_INIT,
+		AMS_RAMP_20V,
+		AMS_CHECK_20V,
+		AMS_RAMP_25V,
+		AMS_HOLD_25V,
+		AMS_PASS,
+		AMS_FAIL_PIRATE,
+		AMS_FAIL_POWER
+	};
 
-        static SubEstadoAMS subState = AMS_INIT;
-        static unsigned long tTimer = 0;
-        static unsigned long tUpdateDisplay = 0;
+	static SubEstadoAMS subState = AMS_INIT;
+	static unsigned long tTimer = 0;
+	static unsigned long tUpdateDisplay = 0;
 
-        static bool erroMostrado = false;
-        static bool musicaTocada = false;
-        static bool isCir = false; 
+	static bool erroMostrado = false;
+	static bool musicaTocada = false;
+	static bool isCir = false;
 
-        if (!flagEntradaEstado)
-        {
-                Serial.println(F("\n=================================="));
-                Serial.println(F("  >>> INICIANDO NOVO TESTE AMS <<<  "));
-                Serial.println(F("=================================="));
-                
-                jiga.desligarTudo();
-                jiga.limparTela();
-                jiga.mostrarTelaMensagem(F("TESTE DO AMS"), F("PREPARE-SE..."), F("Nao mexa na placa"), F(""));
-                delay(1000);
+	if (!flagEntradaEstado)
+	{
+		Serial.println(F("\n=================================="));
+		Serial.println(F("  >>> INICIANDO NOVO TESTE AMS <<<  "));
+		Serial.println(F("=================================="));
 
-                subState = AMS_INIT;
-                erroMostrado = false;
-                musicaTocada = false;
-                isCir = false; 
-                flagEntradaEstado = true;
-        }
+		jiga.desligarTudo();
+		jiga.limparTela();
+		jiga.mostrarTelaMensagem(F("TESTE DO AMS"), F("PREPARE-SE..."), F("Nao mexa na placa"), F(""));
+		delay(1000);
 
-        if (t == TECLA_ESC)
-        {
-                Serial.println(F("[SISTEMA] Teste Abortado pelo botao ESC!"));
-                jiga.desligarTudo();
-                jiga.setPWM(255);
-                jiga.mostrarTelaMensagem(F("TESTE ABORTADO"), F("Seguranca ativada"), F(""), F(""));
-                jiga.beepErro();
-                delay(1000);
-                flagEntradaEstado = false;
-                estadoAtual = ST_MENU;
-                return;
-        }
+		subState = AMS_INIT;
+		erroMostrado = false;
+		musicaTocada = false;
+		isCir = false;
+		flagEntradaEstado = true;
+	}
 
-        switch (subState)
-        {
-        case AMS_INIT:
-                Serial.println(F("[ESTADO] AMS_INIT"));
-                Serial.println(F(" -> Mantendo Vbat desligado para degrau"));
-                Serial.println(F(" -> Acordando a placa (controlarAlvo)"));
-                
-                jiga.setVbat(false); 
-                jiga.controlarAlvo(false);
-                subState = AMS_RAMP_20V;
-                break;
+	if (t == TECLA_ESC)
+	{
+		Serial.println(F("[SISTEMA] Teste Abortado pelo botao ESC!"));
+		jiga.desligarTudo();
+		jiga.setPWM(255);
+		jiga.mostrarTelaMensagem(F("TESTE ABORTADO"), F("Seguranca ativada"), F(""), F(""));
+		jiga.beepErro();
+		delay(1000);
+		flagEntradaEstado = false;
+		estadoAtual = ST_MENU;
+		return;
+	}
 
-        case AMS_RAMP_20V:
-                if (millis() - tUpdateDisplay > 500) 
-                {
-                        char msg[21];
-                        sprintf(msg, "Alvo: 20V  At: %d.%d", (int)s.vLoad, (int)(s.vLoad * 10) % 10);
-                        jiga.mostrarTelaMensagem(F("ETAPA 1: SUBINDO"), F("Buscando 20V..."), msg, F("Placa Desligada"));
-                        
-                        Serial.print(F("[RAMPA 20V] PWM: ")); Serial.print(jiga.getPWM());
-                        Serial.print(F(" | vLoad: ")); Serial.print(s.vLoad);
-                        Serial.print(F("V | v3v3: ")); Serial.println(s.v3v3);
-                        
-                        tUpdateDisplay = millis();
-                }
+	switch (subState)
+	{
+	case AMS_INIT:
+		Serial.println(F("[ESTADO] AMS_INIT"));
+		Serial.println(F(" -> Mantendo Vbat desligado para degrau"));
+		Serial.println(F(" -> Acordando a placa (controlarAlvo)"));
 
-                if (verificarCurtoCircuito(V_AMS_CHECK, s.vLoad)) { 
-                    Serial.println(F("[ERRO] Watchdog de curto desarmou na Rampa 20V!"));
-                    dispararErroCurto(); return; 
-                }
-                
-                jiga.ajustarTensaoAutomatico(V_AMS_CHECK, s.vLoad);
+		jiga.setVbat(false);
+		jiga.controlarAlvo(false);
+		subState = AMS_RAMP_20V;
+		break;
 
-                if (s.vLoad >= (V_AMS_CHECK - 0.4) && s.vLoad <= (V_AMS_CHECK + 0.4))
-                {
-                        Serial.println(F("\n[RAMPA 20V] *** ALVO 20V ATINGIDO! ***"));
-                        Serial.println(F(" -> Ligando relé do Vbat (Degrau de Tensão)"));
-                        jiga.setVbat(true); 
-                        tTimer = millis();
-                        subState = AMS_CHECK_20V;
-                }
-                break;
+	case AMS_RAMP_20V:
+		if (millis() - tUpdateDisplay > 500)
+		{
+			char msg[21];
+			sprintf(msg, "Alvo: 20V  At: %d.%d", (int)s.vLoad, (int)(s.vLoad * 10) % 10);
+			jiga.mostrarTelaMensagem(F("ETAPA 1: SUBINDO"), F("Buscando 20V..."), msg, F("Placa Desligada"));
 
-        case AMS_CHECK_20V:
-                if (verificarCurtoCircuito(V_AMS_CHECK, s.vLoad)) { dispararErroCurto(); return; }
-                jiga.ajustarTensaoAutomatico(V_AMS_CHECK, s.vLoad);
+			Serial.print(F("[RAMPA 20V] PWM: "));
+			Serial.print(jiga.getPWM());
+			Serial.print(F(" | vLoad: "));
+			Serial.print(s.vLoad);
+			Serial.print(F("V | v3v3: "));
+			Serial.println(s.v3v3);
 
-                if (millis() - tUpdateDisplay > 500)
-                {
-                        char msg[21], msgV33[21], linha4[21];
-                        sprintf(msg, "V-Jiga: %d.%d V", (int)s.vLoad, (int)(s.vLoad * 10) % 10);
-                        dtostrf(s.v3v3, 4, 2, msgV33); 
-                        sprintf(linha4, "Lido 3V3: %sV", msgV33);
+			tUpdateDisplay = millis();
+		}
 
-                        jiga.mostrarTelaMensagem(F("AVALIANDO PLACA..."), msg, F("Aguarde 4 seg..."), linha4);
-                        
-                        Serial.print(F("[CHECK 20V] Aguardando... Tempo: "));
-                        Serial.print(millis() - tTimer);
-                        Serial.print(F("ms | vLoad: ")); Serial.print(s.vLoad);
-                        Serial.print(F(" | v3v3 (Real): ")); Serial.println(s.v3v3);
-                        
-                        tUpdateDisplay = millis();
-                }
+		if (verificarCurtoCircuito(V_AMS_CHECK, s.vLoad))
+		{
+			Serial.println(F("[ERRO] Watchdog de curto desarmou na Rampa 20V!"));
+			dispararErroCurto();
+			return;
+		}
 
-                if (millis() - tTimer > 4000)
-                {
-                        // Aqui fazemos as validações e jogamos direto os resultados finais
-                        if (s.v3v3 <= 1.0)
-                        {
-                                Serial.println(F(" -> DECISAO: Falha de Energia (v3v3 <= 1.0)"));
-                                subState = AMS_FAIL_POWER;
-                        }
-                        else if (s.v3v3 >= V_3V3_MIN && s.v3v3 <= V_3V3_MAX)
-                        {
-                                Serial.println(F(" -> DECISAO: Aprovado! Placa Padrao 3.3V"));
-                                isCir = false;
-                                jiga.beepSucesso();
-                                tTimer = millis();
-                                subState = AMS_RAMP_25V;
-                        }
-                        else if (s.v3v3 >= 4.7 && s.v3v3 <= 5.3)
-                        {
-                                Serial.println(F(" -> DECISAO: Aprovado! Placa CIR 5.0V"));
-                                isCir = true; 
-                                jiga.beepSucesso(); 
-                                tTimer = millis();
-                                subState = AMS_RAMP_25V; 
-                        }
-                        else
-                        {
-                                Serial.print(F(" -> DECISAO: Falha! AMS Pirata. Lido: "));
-                                Serial.println(s.v3v3);
-                                subState = AMS_FAIL_PIRATE;
-                        }
-                }
-                break;
+		jiga.ajustarTensaoAutomatico(V_AMS_CHECK, s.vLoad);
 
-        case AMS_RAMP_25V:
-                if (millis() - tUpdateDisplay > 500)
-                {
-                        char msg[21];
-                        sprintf(msg, "Alvo: 25V  At: %d.%d", (int)s.vLoad, (int)(s.vLoad * 10) % 10);
-                        jiga.mostrarTelaMensagem(F("ETAPA 2: STRESS"), F("Subindo p/ 25V..."), msg, F("ATENCAO!"));
-                        
-                        Serial.print(F("[RAMPA 25V] vLoad: ")); Serial.print(s.vLoad);
-                        Serial.print(F("V | v3v3: ")); Serial.println(s.v3v3);
-                        tUpdateDisplay = millis();
-                }
+		if (s.vLoad >= (V_AMS_CHECK - 0.4) && s.vLoad <= (V_AMS_CHECK + 0.4))
+		{
+			Serial.println(F("\n[RAMPA 20V] *** ALVO 20V ATINGIDO! ***"));
+			Serial.println(F(" -> Ligando relé do Vbat (Degrau de Tensão)"));
+			jiga.setVbat(true);
+			tTimer = millis();
+			subState = AMS_CHECK_20V;
+		}
+		break;
 
-                if (verificarCurtoCircuito(V_AMS_STRESS, s.vLoad)) { dispararErroCurto(); return; }
-                jiga.ajustarTensaoAutomatico(V_AMS_STRESS, s.vLoad);
+	case AMS_CHECK_20V:
+		if (verificarCurtoCircuito(V_AMS_CHECK, s.vLoad))
+		{
+			dispararErroCurto();
+			return;
+		}
+		jiga.ajustarTensaoAutomatico(V_AMS_CHECK, s.vLoad);
 
-                if (s.vLoad >= (V_AMS_STRESS - 0.5) && s.vLoad <= (V_AMS_STRESS + 0.5))
-                {
-                        Serial.println(F("[RAMPA 25V] Alvo atingido! Iniciando stress..."));
-                        tTimer = millis();
-                        subState = AMS_HOLD_25V;
-                }
-                break;
+		if (millis() - tUpdateDisplay > 500)
+		{
+			char msg[21], msgV33[21], linha4[21];
+			sprintf(msg, "V-Jiga: %d.%d V", (int)s.vLoad, (int)(s.vLoad * 10) % 10);
+			dtostrf(s.v3v3, 4, 2, msgV33);
+			sprintf(linha4, "Lido 3V3: %sV", msgV33);
 
-        case AMS_HOLD_25V:
-        { 
-                if (verificarCurtoCircuito(V_AMS_STRESS, s.vLoad)) { dispararErroCurto(); return; }
-                jiga.ajustarTensaoAutomatico(V_AMS_STRESS, s.vLoad);
+			jiga.mostrarTelaMensagem(F("AVALIANDO PLACA..."), msg, F("Aguarde 4 seg..."), linha4);
 
-                float minPermitido = isCir ? 4.7 : V_3V3_MIN;
-                float maxPermitido = isCir ? 5.3 : V_3V3_MAX;
+			Serial.print(F("[CHECK 20V] Aguardando... Tempo: "));
+			Serial.print(millis() - tTimer);
+			Serial.print(F("ms | vLoad: "));
+			Serial.print(s.vLoad);
+			Serial.print(F(" | v3v3 (Real): "));
+			Serial.println(s.v3v3);
 
-                if (s.v3v3 < minPermitido || s.v3v3 > maxPermitido)
-                {
-                        Serial.println(F("[HOLD 25V] ERRO! Regulador estourou no stress."));
-                        subState = AMS_FAIL_PIRATE;
-                        return;
-                }
+			tUpdateDisplay = millis();
+		}
 
-                if (millis() - tUpdateDisplay > 500)
-                {
-                        int restantes = 5 - (millis() - tTimer) / 1000;
-                        char msg[21], msgV33[21], msgLinha4[21];
-                        
-                        sprintf(msg, "Espere: %ds", restantes);
-                        dtostrf(s.v3v3, 4, 2, msgV33);
-                        
-                        if (isCir) sprintf(msgLinha4, "5V: %sV (CIR)", msgV33);
-                        else       sprintf(msgLinha4, "3V3: %sV (OK)", msgV33);
+		if (millis() - tTimer > 4000)
+		{
+			// Aqui fazemos as validações e jogamos direto os resultados finais
+			if (s.v3v3 <= 1.0)
+			{
+				Serial.println(F(" -> DECISAO: Falha de Energia (v3v3 <= 1.0)"));
+				subState = AMS_FAIL_POWER;
+			}
+			else if (s.v3v3 >= V_3V3_MIN && s.v3v3 <= V_3V3_MAX)
+			{
+				Serial.println(F(" -> DECISAO: Aprovado! Placa Padrao 3.3V"));
+				isCir = false;
+				jiga.beepSucesso();
+				tTimer = millis();
+				subState = AMS_RAMP_25V;
+			}
+			else if (s.v3v3 >= 4.7 && s.v3v3 <= 5.3)
+			{
+				Serial.println(F(" -> DECISAO: Aprovado! Placa CIR 5.0V"));
+				isCir = true;
+				jiga.beepSucesso();
+				tTimer = millis();
+				subState = AMS_RAMP_25V;
+			}
+			else
+			{
+				Serial.print(F(" -> DECISAO: Falha! AMS Pirata. Lido: "));
+				Serial.println(s.v3v3);
+				subState = AMS_FAIL_PIRATE;
+			}
+		}
+		break;
 
-                        jiga.mostrarTelaMensagem(F("TESTE DESTRUTIVO"), F("Aplicando 25V..."), msg, msgLinha4);
-                        
-                        Serial.print(F("[HOLD 25V] Restam: ")); Serial.print(restantes);
-                        Serial.print(F("s | v3v3 atual: ")); Serial.println(s.v3v3);
-                        tUpdateDisplay = millis();
-                }
+	case AMS_RAMP_25V:
+		if (millis() - tUpdateDisplay > 500)
+		{
+			char msg[21];
+			sprintf(msg, "Alvo: 25V  At: %d.%d", (int)s.vLoad, (int)(s.vLoad * 10) % 10);
+			jiga.mostrarTelaMensagem(F("ETAPA 2: STRESS"), F("Subindo p/ 25V..."), msg, F("ATENCAO!"));
 
-                if (millis() - tTimer > 5000)
-                {
-                        Serial.println(F("[HOLD 25V] Sucesso! Sobreviveu aos 25V."));
-                        subState = AMS_PASS;
-                }
-                break;
-        } 
+			Serial.print(F("[RAMPA 25V] vLoad: "));
+			Serial.print(s.vLoad);
+			Serial.print(F("V | v3v3: "));
+			Serial.println(s.v3v3);
+			tUpdateDisplay = millis();
+		}
 
-        case AMS_PASS:
-                jiga.desligarTudo();
-                jiga.setPWM(255);
+		if (verificarCurtoCircuito(V_AMS_STRESS, s.vLoad))
+		{
+			dispararErroCurto();
+			return;
+		}
+		jiga.ajustarTensaoAutomatico(V_AMS_STRESS, s.vLoad);
 
-                if (!musicaTocada)
-                {
-                        Serial.println(F("[FIM] Teste Aprovado!"));
-                        if (isCir) {
-                            jiga.mostrarTelaMensagem(F("PLACA CIR (5V)"), F("APROVADO (25V OK)"), F("Regulador Robusto"), F("ENTER p/ Continuar"));
-                        } else {
-                            jiga.mostrarTelaMensagem(F("AMS ORIGINAL"), F("APROVADO (25V OK)"), F("Regulador Robusto"), F("ENTER p/ Continuar"));
-                        }
-                        
-                        jiga.tocarMelodiaVitoria();
-                        musicaTocada = true;
-                }
+		if (s.vLoad >= (V_AMS_STRESS - 0.5) && s.vLoad <= (V_AMS_STRESS + 0.5))
+		{
+			Serial.println(F("[RAMPA 25V] Alvo atingido! Iniciando stress..."));
+			tTimer = millis();
+			subState = AMS_HOLD_25V;
+		}
+		break;
 
-                if (t == TECLA_ENTER)
-                {
-                        flagEntradaEstado = false;
-                        estadoAtual = ST_INIT_TEST;
-                }
-                break;
+	case AMS_HOLD_25V:
+	{
+		if (verificarCurtoCircuito(V_AMS_STRESS, s.vLoad))
+		{
+			dispararErroCurto();
+			return;
+		}
+		jiga.ajustarTensaoAutomatico(V_AMS_STRESS, s.vLoad);
 
-        case AMS_FAIL_POWER:
-                if (!erroMostrado)
-                {
-                        jiga.desligarTudo();
-                        jiga.setPWM(255);
-                        jiga.mostrarTelaMensagem(F("ERRO: SEM ALIMENTACAO"), F("Tensao < 1.0V"), F("Verifique conexoes!"), F("PRESSIONE BOTAO"));
-                        jiga.beepErro();
-                        erroMostrado = true;
-                }
-                if (t != NENHUMA) { flagEntradaEstado = false; estadoAtual = ST_REPROVADO; }
-                break;
+		float minPermitido = isCir ? 4.7 : V_3V3_MIN;
+		float maxPermitido = isCir ? 5.3 : V_3V3_MAX;
 
-        case AMS_FAIL_PIRATE:
-                if (!erroMostrado)
-                {
-                        jiga.desligarTudo();
-                        jiga.setPWM(255);
-                        jiga.mostrarTelaMensagem(F("FALHA: AMS PIRATA"), F("Trocar Imediato!"), F("Nao aguentou carga"), F("PRESSIONE BOTAO"));
-                        jiga.beepErro();
-                        erroMostrado = true;
-                }
-                if (t != NENHUMA) { flagEntradaEstado = false; estadoAtual = ST_REPROVADO; }
-                break;
-        }
+		if (s.v3v3 < minPermitido || s.v3v3 > maxPermitido)
+		{
+			Serial.println(F("[HOLD 25V] ERRO! Regulador estourou no stress."));
+			subState = AMS_FAIL_PIRATE;
+			return;
+		}
+
+		if (millis() - tUpdateDisplay > 500)
+		{
+			int restantes = 5 - (millis() - tTimer) / 1000;
+			char msg[21], msgV33[21], msgLinha4[21];
+
+			sprintf(msg, "Espere: %ds", restantes);
+			dtostrf(s.v3v3, 4, 2, msgV33);
+
+			if (isCir)
+				sprintf(msgLinha4, "5V: %sV (CIR)", msgV33);
+			else
+				sprintf(msgLinha4, "3V3: %sV (OK)", msgV33);
+
+			jiga.mostrarTelaMensagem(F("TESTE DESTRUTIVO"), F("Aplicando 25V..."), msg, msgLinha4);
+
+			Serial.print(F("[HOLD 25V] Restam: "));
+			Serial.print(restantes);
+			Serial.print(F("s | v3v3 atual: "));
+			Serial.println(s.v3v3);
+			tUpdateDisplay = millis();
+		}
+
+		if (millis() - tTimer > 5000)
+		{
+			Serial.println(F("[HOLD 25V] Sucesso! Sobreviveu aos 25V."));
+			subState = AMS_PASS;
+		}
+		break;
+	}
+
+	case AMS_PASS:
+		jiga.desligarTudo();
+		jiga.setPWM(255);
+
+		if (!musicaTocada)
+		{
+			Serial.println(F("[FIM] Teste Aprovado!"));
+			if (isCir)
+			{
+				jiga.mostrarTelaMensagem(F("PLACA CIR (5V)"), F("APROVADO (25V OK)"), F("Regulador Robusto"), F("ENTER p/ Continuar"));
+			}
+			else
+			{
+				jiga.mostrarTelaMensagem(F("AMS ORIGINAL"), F("APROVADO (25V OK)"), F("Regulador Robusto"), F("ENTER p/ Continuar"));
+			}
+
+			jiga.tocarMelodiaVitoria();
+			musicaTocada = true;
+		}
+
+		if (t == TECLA_ENTER)
+		{
+			flagEntradaEstado = false;
+			estadoAtual = ST_INIT_TEST;
+		}
+		break;
+
+	case AMS_FAIL_POWER:
+		if (!erroMostrado)
+		{
+			jiga.desligarTudo();
+			jiga.setPWM(255);
+			jiga.mostrarTelaMensagem(F("ERRO: SEM ALIMENTACAO"), F("Tensao < 1.0V"), F("Verifique conexoes!"), F("PRESSIONE BOTAO"));
+			jiga.beepErro();
+			erroMostrado = true;
+		}
+		if (t != NENHUMA)
+		{
+			flagEntradaEstado = false;
+			estadoAtual = ST_REPROVADO;
+		}
+		break;
+
+	case AMS_FAIL_PIRATE:
+		if (!erroMostrado)
+		{
+			jiga.desligarTudo();
+			jiga.setPWM(255);
+			jiga.mostrarTelaMensagem(F("FALHA: AMS PIRATA"), F("Trocar Imediato!"), F("Nao aguentou carga"), F("PRESSIONE BOTAO"));
+			jiga.beepErro();
+			erroMostrado = true;
+		}
+		if (t != NENHUMA)
+		{
+			flagEntradaEstado = false;
+			estadoAtual = ST_REPROVADO;
+		}
+		break;
+	}
 }
 void TestController::handleManual(Tecla t, LeituraSensores &s)
 {
@@ -697,104 +734,293 @@ void TestController::handleInitTest()
 	jiga.mostrarTelaMensagem(F("INICIANDO TESTES..."), F("Aguarde..."), F(""), F(""));
 	delay(1000);
 	flagEntradaEstado = false;
-	estadoAtual = ST_COM_UART;
+	estadoAtual = ST_LEITURA_UART;
 }
 
-void TestController::handleComUart()
+// void TestController::handleComUart()
+// {
+// 	static bool enviado = false;
+
+// 	if (!flagEntradaEstado)
+// 	{
+// 		jiga.limparTela();
+// 		jiga.mostrarTelaMensagem(F("1. TESTE SERIAL"), F("Conectando..."), F("Binario + CRC"), F(""));
+// 		jiga.controlarAlvo(true);
+// 		jiga.desligarTudo();
+// 		// jiga.setVbat(false);
+// 		// jiga.setCarga(true);
+// 		jiga.setVbat(true);
+// 		jiga.setCarga(false);
+// 		jiga.limparBufferUART();
+// 		timerEstado = millis();
+// 		enviado = false;
+// 		flagEntradaEstado = true;
+// 	}
+
+// 	if (!enviado && millis() - timerEstado > 1000)
+// 	{
+// 		uint8_t pacote[10];
+// 		pacote[0] = 0x04;
+// 		pacote[1] = 0x81;
+// 		size_t len = Protocolo::anexarCRC(pacote, 2);
+// 		jiga.enviarBytesComoASCII(pacote, len);
+// 		enviado = true;
+// 		timerEstado = millis();
+// 	}
+
+// 	if (enviado)
+// 	{
+// 		if (jiga.lerPacoteBinario())
+// 		{
+// 			uint8_t *bufRaw = jiga.getBufferBytes();
+// 			size_t tamRaw = jiga.getTamanhoBuffer();
+// 			RespostaInterpretada resp = Protocolo::interpretarPacote(bufRaw, tamRaw);
+
+// 			if (resp.crcValido)
+// 			{
+// 				uint8_t dados[32];
+// 				int idx = 0;
+
+// 				// Conversão Hex -> Byte usando Helper do Protocolo
+// 				for (size_t i = 0; i < tamRaw; i += 2)
+// 				{
+// 					if (i + 1 >= tamRaw || idx >= 32)
+// 						break;
+// 					uint8_t h = Protocolo::charParaByte(bufRaw[i]);
+// 					uint8_t l = Protocolo::charParaByte(bufRaw[i + 1]);
+// 					dados[idx++] = (h << 4) | l;
+// 				}
+
+// 				uint8_t fwVersion = dados[2];
+// 				uint16_t vFonte = (dados[7] << 8) | dados[8];
+// 				uint16_t vBat = (dados[9] << 8) | dados[10];
+
+// 				if (fwVersion == 0x04 && (resp.status == 0x81 || resp.status == 0x15))
+// 				{
+// 					char msgFonte[21], msgBat[21];
+// 					sprintf(msgFonte, "V.Fonte: %d", vFonte);
+// 					sprintf(msgBat, "V.Bat:   %d", vBat);
+// 					jiga.mostrarTelaMensagem(F("PLACA COMPATIVEL"), F("FW: v04 Detectado"), msgFonte, msgBat);
+
+// 					jiga.beepSucesso();
+// 					delay(3000);
+// 					flagEntradaEstado = false;
+// 					estadoAtual = ST_POWER_CHECK;
+// 				}
+// 				else
+// 				{
+// 					char msgErro[21];
+// 					sprintf(msgErro, "Lido: v%02X", fwVersion);
+// 					jiga.mostrarTelaMensagem(F("ERRO VERSAO FW"), F("Esperado: v04"), msgErro, "Falha Serial");
+// 					jiga.beepErro();
+// 					delay(3000);
+// 					estadoAtual = ST_REPROVADO;
+// 				}
+// 			}
+// 			else
+// 			{
+// 				jiga.mostrarTelaMensagem(F("ERRO CRC"), F("Dados Corrompidos"), F(""), F(""));
+// 				jiga.beepErro();
+// 				estadoAtual = ST_REPROVADO;
+// 			}
+// 		}
+// 		if (millis() - timerEstado > 5000)
+// 		{
+// 			jiga.mostrarTelaMensagem(F("TIMEOUT"), F("Sem resposta"), F(""), F(""));
+// 			jiga.beepErro();
+// 			flagEntradaEstado = false;
+// 			estadoAtual = ST_REPROVADO;
+// 		}
+// 	}
+// }
+
+// Função igual a de cima, mas com propostas de melhoria:
+// void TestController::handleLeituraUart()
+// {
+// 	static bool leituraConcluida = false;
+// 	static unsigned long timerExibicao = 0; // A nossa variável da "Fotografia"
+
+// 	// 1. INICIALIZAÇÃO DA TELA (Roda só 1 vez)
+// 	if (!flagEntradaEstado)
+// 	{
+// 		jiga.controlarAlvo(true);
+// 		jiga.limparTela();
+// 		jiga.mostrarTelaMensagem(F("LENDO PLACA..."), F("Aguarde..."), F(""), F(""));
+
+// 		jiga.limparBufferUART();
+
+// 		uint8_t pacote[2] = {0x04, 0x81};
+// 		size_t len = Protocolo::anexarCRC(pacote, 2);
+// 		jiga.enviarBytesComoASCII(pacote, len);
+
+// 		leituraConcluida = false;
+// 		flagEntradaEstado = true;
+// 	}
+
+// 	// 2. FASE DE LEITURA E GATILHO
+// 	if (!leituraConcluida)
+// 	{
+// 		if (jiga.lerPacoteBinario())
+// 		{
+// 			// [CÓDIGO DE PROTOCOLO E CRC OCULTADOS AQUI]
+
+// 			uint8_t fwVersion = dados[2];
+// 			uint16_t vFonte = (dados[7] << 8) | dados[8];
+// 			uint16_t vBat = (dados[9] << 8) | dados[10];
+
+// 			if (fwVersion >= 0x04) // Sua ideia de compatibilidade futura!
+// 			{
+// 				char msgFonte[21], msgBat[21];
+// 				sprintf(msgFonte, "V.Fonte: %d", vFonte);
+// 				sprintf(msgBat, "V.Bat:   %d", vBat);
+// 				jiga.mostrarTelaMensagem(F("DADOS RECEBIDOS"), F("FW: OK"), msgFonte, msgBat);
+
+// 				jiga.beepSucesso();
+
+// 				leituraConcluida = true; // Libera a Fase 3
+
+// 				// --- RESPOSTA DA PERGUNTA 1 (O Gatilho) ---
+// 				// Tiro a "fotografia" da hora exata que a leitura deu certo
+// 				timerExibicao = millis();
+// 			}
+// 			else
+// 			{
+// 				estadoAtual = ST_REPROVADO; // FW incompatível
+// 			}
+// 		}
+// 	}
+
+// 	// 3. FASE DE EXIBIÇÃO (Contando o tempo sem travar o Arduino)
+// 	if (leituraConcluida)
+// 	{
+// 		// --- RESPOSTA DA PERGUNTA 2 (A Checagem Universal) ---
+// 		if (millis() - timerExibicao > 5000)
+// 		{
+// 			// --- RESPOSTA DA PERGUNTA 3 (A Fuga) ---
+// 			estadoAtual = ST_POWER_TEST;
+
+// 			flagEntradaEstado = false; // Prepara a casa para o próximo estado
+// 		}
+// 	}
+// }
+
+void TestController::handleLeituraUart()
 {
-	static bool enviado = false;
+    static bool leituraConcluida = false;
+    static bool comandoEnviado = false;
+    static unsigned long timerExibicao = 0; // Cronômetro da mensagem de sucesso
 
-	if (!flagEntradaEstado)
-	{
-		jiga.limparTela();
-		jiga.mostrarTelaMensagem(F("1. TESTE SERIAL"), F("Conectando..."), F("Binario + CRC"), F(""));
-		jiga.controlarAlvo(true);
-		jiga.desligarTudo();
-		// jiga.setVbat(false);
-		// jiga.setCarga(true);
-		jiga.setVbat(true);
-		jiga.setCarga(false);
-		jiga.limparBufferUART();
-		timerEstado = millis();
-		enviado = false;
-		flagEntradaEstado = true;
-	}
+    // ==========================================
+    // 1. INICIALIZAÇÃO
+    // ==========================================
+    if (!flagEntradaEstado)
+    {
+        jiga.limparTela();
+        jiga.mostrarTelaMensagem(F("3. LENDO PLACA..."), F("Aguarde..."), F(""), F(""));
+        jiga.limparBufferUART();
 
-	if (!enviado && millis() - timerEstado > 1000)
-	{
-		uint8_t pacote[10];
-		pacote[0] = 0x04;
-		pacote[1] = 0x81;
-		size_t len = Protocolo::anexarCRC(pacote, 2);
-		jiga.enviarBytesComoASCII(pacote, len);
-		enviado = true;
-		timerEstado = millis();
-	}
+	jiga.setVbat(true);
+	jiga.controlarAlvo(true);
+        
+        comandoEnviado = false;
+        leituraConcluida = false;
+        
+        // Cronômetro Mestre: Guarda a hora que a placa foi ligada
+        timerEstado = millis(); 
+        
+        flagEntradaEstado = true;
+    }
 
-	if (enviado)
-	{
-		if (jiga.lerPacoteBinario())
-		{
-			uint8_t *bufRaw = jiga.getBufferBytes();
-			size_t tamRaw = jiga.getTamanhoBuffer();
-			RespostaInterpretada resp = Protocolo::interpretarPacote(bufRaw, tamRaw);
+    // ==========================================
+    // 2. FASE DE LEITURA (Enquanto não deu sucesso nem timeout)
+    // ==========================================
+    if (!leituraConcluida)
+    {
+        // A) Espera 1 segundo de "Boot" antes de enviar a pergunta
+        if (!comandoEnviado && (millis() - timerEstado > 2000))
+        {
+            uint8_t pacote[2] = {0x04, 0x81};
+            size_t len = Protocolo::anexarCRC(pacote, 2);
+            jiga.enviarBytesComoASCII(pacote, len);
+            comandoEnviado = true;
+        }
 
-			if (resp.crcValido)
-			{
-				uint8_t dados[32];
-				int idx = 0;
+        // B) Se já perguntou, fica ouvindo a resposta
+        if (comandoEnviado)
+        {
+            if (jiga.lerPacoteBinario())
+            {
+                uint8_t *bufRaw = jiga.getBufferBytes();
+                size_t tamRaw = jiga.getTamanhoBuffer();
+                RespostaInterpretada resp = Protocolo::interpretarPacote(bufRaw, tamRaw);
 
-				// Conversão Hex -> Byte usando Helper do Protocolo
-				for (size_t i = 0; i < tamRaw; i += 2)
-				{
-					if (i + 1 >= tamRaw || idx >= 32)
-						break;
-					uint8_t h = Protocolo::charParaByte(bufRaw[i]);
-					uint8_t l = Protocolo::charParaByte(bufRaw[i + 1]);
-					dados[idx++] = (h << 4) | l;
-				}
+                if (resp.crcValido)
+                {
+                    uint8_t dados[32];
+                    int idx = 0;
+                    
+                    // Decodifica a sopa de letrinhas (Hex) para Bytes
+                    for (size_t i = 0; i < tamRaw; i += 2)
+                    {
+                        if (i + 1 >= tamRaw || idx >= 32) break;
+                        uint8_t h = Protocolo::charParaByte(bufRaw[i]);
+                        uint8_t l = Protocolo::charParaByte(bufRaw[i + 1]);
+                        dados[idx++] = (h << 4) | l;
+                    }
 
-				uint8_t fwVersion = dados[2];
-				uint16_t vFonte = (dados[7] << 8) | dados[8];
-				uint16_t vBat = (dados[9] << 8) | dados[10];
+                    // Extrai as informações brutas
+                    uint8_t fwVersion = dados[2];
+                    uint16_t vFonte = (dados[7] << 8) | dados[8];
+                    uint16_t vBat = (dados[9] << 8) | dados[10];
 
-				if (fwVersion == 0x04 && (resp.status == 0x81 || resp.status == 0x15))
-				{
-					char msgFonte[21], msgBat[21];
-					sprintf(msgFonte, "V.Fonte: %d", vFonte);
-					sprintf(msgBat, "V.Bat:   %d", vBat);
-					jiga.mostrarTelaMensagem(F("PLACA COMPATIVEL"), F("FW: v04 Detectado"), msgFonte, msgBat);
+                    if (fwVersion >= 0x04) 
+                    {
+                        char msgFonte[21], msgBat[21];
+                        sprintf(msgFonte, "V.Fonte: %d", vFonte);
+                        sprintf(msgBat, "V.Bat:   %d", vBat);
+                        
+                        jiga.mostrarTelaMensagem(F("DADOS RECEBIDOS"), F("FW: OK"), msgFonte, msgBat);
+                        jiga.beepSucesso();
 
-					jiga.beepSucesso();
-					delay(3000);
-					flagEntradaEstado = false;
-					estadoAtual = ST_POWER_CHECK;
-				}
-				else
-				{
-					char msgErro[21];
-					sprintf(msgErro, "Lido: v%02X", fwVersion);
-					jiga.mostrarTelaMensagem(F("ERRO VERSAO FW"), F("Esperado: v04"), msgErro, "Falha Serial");
-					jiga.beepErro();
-					delay(3000);
-					estadoAtual = ST_REPROVADO;
-				}
-			}
-			else
-			{
-				jiga.mostrarTelaMensagem(F("ERRO CRC"), F("Dados Corrompidos"), F(""), F(""));
-				jiga.beepErro();
-				estadoAtual = ST_REPROVADO;
-			}
-		}
-		if (millis() - timerEstado > 5000)
-		{
-			jiga.mostrarTelaMensagem(F("TIMEOUT"), F("Sem resposta"), F(""), F(""));
-			jiga.beepErro();
-			flagEntradaEstado = false;
-			estadoAtual = ST_REPROVADO;
-		}
-	}
+                        leituraConcluida = true; // Libera a Fase 3
+                        timerExibicao = millis(); // Tira a "foto" para os 5 segundos!
+                    }
+                    else
+                    {
+                        char msgErro[21];
+                        sprintf(msgErro, "Lido: v%02X", fwVersion);
+                        jiga.mostrarTelaMensagem(F("ERRO VERSAO FW"), F("Incompativel"), msgErro, F("Falha Serial"));
+                        jiga.beepErro();
+                        delay(3000); // Como é Rota de Fuga/Falha, um delay aqui é aceitável
+                        estadoAtual = ST_REPROVADO;
+                    }
+                }
+            }
+        }
+
+        // C) TIMEOUT (A Barreira contra Congelamento)
+        // Se a placa demorou mais de 4 segundos e nada aconteceu:
+        if (millis() - timerEstado > 4000)
+        {
+            jiga.mostrarTelaMensagem(F("ERRO: TIMEOUT"), F("Sem resposta Serial"), F(""), F(""));
+            jiga.beepErro();
+            delay(2000);
+            flagEntradaEstado = false;
+            estadoAtual = ST_REPROVADO;
+        }
+    }
+
+    // ==========================================
+    // 3. FASE DE EXIBIÇÃO (5 Segundos rodando livremente)
+    // ==========================================
+    if (leituraConcluida)
+    {
+        if (millis() - timerExibicao > 5000)
+        {
+            flagEntradaEstado = false;
+            estadoAtual = ST_POWER_TEST; // Vai testar o capacitor!
+        }
+    }
 }
 
 void TestController::handlePowerCheck(LeituraSensores &s)
@@ -821,7 +1047,7 @@ void TestController::handlePowerCheck(LeituraSensores &s)
 		jiga.beep();
 		jiga.setCarga(true);
 		flagEntradaEstado = false;
-		estadoAtual = ST_POWER_TEST;
+		estadoAtual = ST_LEITURA_UART;
 	}
 
 	if (millis() - timerEstado > 15000)
@@ -941,11 +1167,22 @@ void TestController::handleLedPrep(LeituraSensores &s)
 	delay(15);
 }
 
+
 void TestController::handleLedTest(Tecla t, LeituraSensores &s)
 {
 	static unsigned long tUpdateDisplay = 0;
 	static int passoAnterior = -1;
-	// INJETE ESTA LINHA AQUI:
+
+	// --- VARIÁVEIS PARA A VALIDAÇÃO CRUZADA ---
+	static unsigned long timerUart = 0;
+	static bool aguardandoResposta = false;
+	
+	static float ultimaLeituraVin = 0.0; 
+	static float ultimaLeituraVbat = 0.0;
+
+	// ==========================================
+	// 1. CONTROLE DE POTÊNCIA E SEGURANÇA
+	// ==========================================
 	if (verificarCurtoCircuito(listaTensoes[passoLed], s.vLoad))
 	{
 		dispararErroCurto();
@@ -953,10 +1190,91 @@ void TestController::handleLedTest(Tecla t, LeituraSensores &s)
 	}
 	jiga.ajustarTensaoAutomatico(listaTensoes[passoLed], s.vLoad);
 
+	// ==========================================
+	// 2. VALIDAÇÃO CRUZADA (A partir do 2º passo: passoLed >= 1)
+	// ==========================================
+	if (passoLed >= 1)
+	{
+		// A) Pede a foto a cada 1 segundo
+		if (!aguardandoResposta && (millis() - timerUart > 1000))
+		{
+			jiga.limparBufferUART();
+			uint8_t pacote[2] = {0x04, 0x81};
+			size_t len = Protocolo::anexarCRC(pacote, 2);
+			jiga.enviarBytesComoASCII(pacote, len);
+			
+			aguardandoResposta = true;
+			timerUart = millis();
+		}
+
+		// B) Escuta a resposta
+		if (aguardandoResposta)
+		{
+			if (jiga.lerPacoteBinario())
+			{
+				uint8_t *bufRaw = jiga.getBufferBytes();
+				size_t tamRaw = jiga.getTamanhoBuffer();
+				RespostaInterpretada resp = Protocolo::interpretarPacote(bufRaw, tamRaw);
+
+				if (resp.crcValido)
+				{
+					uint8_t dados[32];
+					int idx = 0;
+					for (size_t i = 0; i < tamRaw; i += 2) {
+						if (i + 1 >= tamRaw || idx >= 32) break;
+						dados[idx++] = (Protocolo::charParaByte(bufRaw[i]) << 4) | Protocolo::charParaByte(bufRaw[i + 1]);
+					}
+
+					uint16_t vFonteRaw = (dados[7] << 8) | dados[8];
+					uint16_t vBatRaw   = (dados[9] << 8) | dados[10];
+					
+					ultimaLeituraVin  = vFonteRaw / 1000.0; 
+					ultimaLeituraVbat = vBatRaw / 1000.0;
+
+					// Tolerância: Verifica erro na Entrada da Fonte
+					if (abs(s.vLoad - ultimaLeituraVin) > 0.5)
+					{
+						char msgPlaca[21], msgJiga[21], linha3[21], linha4[21];
+						dtostrf(ultimaLeituraVin, 4, 1, msgPlaca);
+						dtostrf(s.vLoad, 4, 1, msgJiga);
+						
+						sprintf(linha3, "Placa le: %sV", msgPlaca);
+						sprintf(linha4, "Jiga envia: %sV", msgJiga);
+
+						jiga.desligarTudo();
+						jiga.setPWM(255);
+						jiga.mostrarTelaMensagem(F("FALHA: LEITURA PLACA"), F("Diferenca > 0.5V"), linha3, linha4);
+						jiga.beepErro();
+						delay(3000); 
+						
+						aguardandoResposta = false;
+						flagEntradaEstado = false;
+						estadoAtual = ST_REPROVADO;
+						return; 
+					}
+				}
+				aguardandoResposta = false; 
+			}
+			else if (millis() - timerUart > 500) 
+			{
+				aguardandoResposta = false; 
+			}
+		}
+	}
+	else
+	{
+		// No Passo 0 (LEDS APAGADOS), limpamos as variáveis para não mostrar lixo
+		ultimaLeituraVin = 0.0;
+		ultimaLeituraVbat = 0.0;
+	}
+
+	// ==========================================
+	// 3. NOVO DASHBOARD DO LCD
+	// ==========================================
 	if (!flagEntradaEstado || passoLed != passoAnterior)
 	{
 		jiga.limparTela();
-		jiga.mostrarTelaMensagem(F("3. TESTE LEDS"), listaMsgs[passoLed], "V-JIGA:      V", "DIR >> CONFIRMA");
+		jiga.mostrarTelaMensagem(listaMsgs[passoLed], "JIGA OUT:      V", "VIN:     BAT:     ", "DIR:SIM | ESC:NAO");
 		passoAnterior = passoLed;
 		flagEntradaEstado = true;
 		tUpdateDisplay = 0;
@@ -964,32 +1282,52 @@ void TestController::handleLedTest(Tecla t, LeituraSensores &s)
 
 	if (millis() - tUpdateDisplay > 200)
 	{
-		char atualStr[10];
-		dtostrf(s.vLoad, 4, 2, atualStr);
-		jiga.atualizarParteTela(2, 8, atualStr);
+		char strJiga[6], strVin[6], strBat[6];
+		
+		dtostrf(s.vLoad, 4, 1, strJiga);
+		
+		jiga.atualizarParteTela(1, 10, strJiga); 
+
+		// Só mostra os valores da placa se já estiver liberado (passo 1 em diante)
+		if (passoLed >= 1) 
+		{
+			dtostrf(ultimaLeituraVin, 4, 1, strVin);
+			dtostrf(ultimaLeituraVbat, 4, 1, strBat);
+			jiga.atualizarParteTela(2, 4, strVin);   
+			jiga.atualizarParteTela(2, 13, strBat);  
+		} 
+		else 
+		{
+			jiga.atualizarParteTela(2, 4, "--- ");
+			jiga.atualizarParteTela(2, 13, "--- ");
+		}
+
 		tUpdateDisplay = millis();
 	}
 
+	// ==========================================
+	// 4. NAVEGAÇÃO
+	// ==========================================
 	if (t == TECLA_ENTER)
 	{
 		jiga.beep();
 		passoLed++;
 
-		if (passoLed >= TOTAL_PASSOS_LED)
-		{
+		if (passoLed >= TOTAL_PASSOS_LED) {
 			flagEntradaEstado = false;
 			estadoAtual = ST_APROVADO;
-		}
-		else
-		{
-			// --- A CORREÇÃO ESTÁ AQUI ---
-			// Antigamente só tinha um delay(200); aqui.
-			// Precisamos mandar ele de volta para a tela de "Aguarde..." (Prep)
-			// para que ele suba a tensão e caia no seu IF!
-
+		} else {
 			flagEntradaEstado = false;
 			estadoAtual = ST_LED_PREP;
 		}
+	}
+
+	if (t == TECLA_ESC)
+	{
+		jiga.beepErro();
+		passoLed = 0;
+		flagEntradaEstado = false;
+		estadoAtual = ST_REPROVADO;
 	}
 }
 

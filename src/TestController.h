@@ -7,10 +7,10 @@ enum EstadoSistema
 {
 	ST_MENU,
 	ST_MANUAL,
-	ST_AMS_TEST, // <--- Novo Estado
+	ST_AMS_TEST,
 	ST_INIT_TEST,
-	ST_COM_UART,
 	ST_POWER_CHECK,
+	ST_LEITURA_UART, // <--- O NOVO ESTADO AQUI
 	ST_POWER_TEST,
 	ST_LED_PREP,
 	ST_LED_TEST,
@@ -28,11 +28,11 @@ private:
 	unsigned long timerEstado;
 	int opcaoMenu;
 	int passoLed;
-	bool flagEntradaEstado;
+	bool flagEntradaEstado;	 // Esse é o atributo que me fala, dentro de todos os estados se é a primeira vez ou não dela
 	bool habilitarTesteCCPS; // <--- NOVA FLAG CLARA E DESCRITIVA
-	// --- VARIÁVEIS DE SEGURANÇA (NOVO) ---
-    float alvoVoutAtual;
-    unsigned long timerCurto;
+				 // --- VARIÁVEIS DE SEGURANÇA (NOVO) ---
+	float alvoVoutAtual;
+	unsigned long timerCurto;
 
 	// Configuração de Testes
 	static const int TOTAL_PASSOS_LED = 7;
@@ -40,8 +40,13 @@ private:
 	    V_TEST_UNDER, V_TEST_0_25, V_TEST_25_50, V_TEST_50_75,
 	    V_TEST_75_100, V_TEST_OVER, V_TEST_CRITICAL};
 	const char *listaMsgs[7] = {
-	    "LEDS APAGADOS?", "VM PISCA (0-25)?", "VM ACESO (25-50)?",
-	    "VD PISCA (50-75)?", "VD ACESO (100%)?", "PISCA ALTERNADO?", "PISCA JUNTOS?"};
+	    "LEDS APAGADOS?", 
+	    "VM PISCA (0-25)?", 
+	    "VM ACESO (25-50)?",
+	    "VD PISCA (50-75)?", 
+	    "VD ACESO (100%)?", 
+	    "PISCA ALTERNADO?", 
+	    "PISCA JUNTOS?"};
 
 	// Handlers de Estado
 	void handleMenu(Tecla t);
@@ -50,6 +55,7 @@ private:
 	void handleInitTest();
 	void handleComUart();
 	void handlePowerCheck(LeituraSensores &s);
+	void handleLeituraUart(); // <--- DECLARE A NOVA FUNÇÃO AQUI
 	void handlePowerTest(Tecla t, LeituraSensores &s);
 	void handleLedPrep(LeituraSensores &s);
 	void handleLedTest(Tecla t, LeituraSensores &s);
@@ -57,8 +63,8 @@ private:
 	void handleReprovado(Tecla t);
 
 	// --- MÉTODOS DE SEGURANÇA (NOVO) ---
-    bool verificarCurtoCircuito(float alvo, float atual);
-    void dispararErroCurto();
+	bool verificarCurtoCircuito(float alvo, float atual);
+	void dispararErroCurto();
 
 	void resetarSistema();
 
