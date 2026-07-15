@@ -30,18 +30,18 @@ private:
 	int passoLed;
 	bool flagEntradaEstado;
 	bool habilitarTesteCCPS; // <--- NOVA FLAG CLARA E DESCRITIVA
-	// --- VARIÁVEIS DE SEGURANÇA (NOVO) ---
-    float alvoVoutAtual;
-    unsigned long timerCurto;
+				 // --- VARIÁVEIS DE SEGURANÇA (NOVO) ---
+	float alvoVoutAtual;
+	unsigned long timerCurto;
 
 	// Configuração de Testes
-	static const int TOTAL_PASSOS_LED = 7;
-	const float listaTensoes[7] = {
-	    V_TEST_UNDER, V_TEST_0_25, V_TEST_25_50, V_TEST_50_75,
+	static const int TOTAL_PASSOS_LED = 10;
+	const float listaTensoes[10] = {
+	    V_TEST_UNDER, V_TEST_0_FRESH_BOOT, V_TEST_50_FRESH_BOOT, V_TEST_0_FRESH_BOOT, V_TEST_0_25, V_TEST_25_50, V_TEST_50_75,
 	    V_TEST_75_100, V_TEST_OVER, V_TEST_CRITICAL};
-	const char *listaMsgs[7] = {
-	    "LEDS APAGADOS?", "VM PISCA (0-25)?", "VM ACESO (25-50)?",
-	    "VD PISCA (50-75)?", "VD ACESO (100%)?", "PISCA ALTERNADO?", "PISCA JUNTOS?"};
+	const char *listaMsgs[10] = {
+	    "LEDS APAGADOS P1?", "VM PISCA RAPIDO?", "VD PISCA LENTO?", "LEDS APAGADOS P2?", "VM PISCA RAPIDO?", "VM PISCA LENTO?",
+	    "VD PISCA LENTO?", "VD PISCA RAPIDO?", "PISCA ALTERNADO?", "PISCA JUNTOS?"};
 
 	// Handlers de Estado
 	void handleMenu(Tecla t);
@@ -57,8 +57,8 @@ private:
 	void handleReprovado(Tecla t);
 
 	// --- MÉTODOS DE SEGURANÇA (NOVO) ---
-    bool verificarCurtoCircuito(float alvo, float atual);
-    void dispararErroCurto();
+	bool verificarCurtoCircuito(float alvo, float atual);
+	void dispararErroCurto();
 
 	void resetarSistema();
 
