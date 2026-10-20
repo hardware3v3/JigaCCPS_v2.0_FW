@@ -81,6 +81,9 @@ const float TOLERANCIA_AJUSTE = 0.10;
 // Intervalo mínimo entre correções de PWM: dá tempo do filtro/capacitor de saída
 // acompanhar o degrau antes da próxima correção (evita overshoot/oscilação).
 const unsigned long INTERVALO_AJUSTE_MS = 40;
+// Telemetria de diagnóstico pela Serial (9600). Comente para desligar.
+#define DEBUG_TELEMETRIA
+
 // Leituras consecutivas dentro da tolerância para considerar a tensão estabilizada.
 const uint8_t LEITURAS_ESTAVEIS_AJUSTE = 5;
 

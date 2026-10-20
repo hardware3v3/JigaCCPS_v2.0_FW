@@ -22,6 +22,26 @@ void TestController::run()
 	Tecla t = jiga.lerTeclado();
 	LeituraSensores s = jiga.lerTudo();
 
+#ifdef DEBUG_TELEMETRIA
+	// Telemetria de diagnóstico: estado + atuadores + sensores a cada 500ms
+	static unsigned long tTele = 0;
+	if (millis() - tTele > 500)
+	{
+		tTele = millis();
+		Serial.print(F("[T] ms="));   Serial.print(tTele);
+		Serial.print(F(" st="));      Serial.print((int)estadoAtual);
+		Serial.print(F(" p="));       Serial.print(passoLed);
+		Serial.print(F(" pwm="));     Serial.print(jiga.getPWM());
+		Serial.print(F(" vLoad="));   Serial.print(s.vLoad);
+		Serial.print(F(" vCCPS="));   Serial.print(s.vCCPS);
+		Serial.print(F(" vCap="));    Serial.print(s.vCap);
+		Serial.print(F(" v3v3="));    Serial.print(s.v3v3);
+		Serial.print(F(" VBAT="));    Serial.print(digitalRead(VBAT_ON_PIN));
+		Serial.print(F(" LOAD="));    Serial.print(digitalRead(LOAD_ON_PIN));
+		Serial.print(F(" RST="));     Serial.println(digitalRead(PIN_DUT_RST));
+	}
+#endif
+
 	// 2. Segurança Global
 	if (jiga.checarResetEmergencia())
 		resetarSistema();
@@ -986,18 +1006,18 @@ void TestController::handleLedPrep(LeituraSensores &s)
 	// Quando a Jiga finalmente estabilizar na tensão alvo:
 	if (leiturasEstaveis >= LEITURAS_ESTAVEIS_AJUSTE)
 	{
-		// Boot a frio do DUT já na tensão alvo. Antes este bloco rodava a cada
-		// iteração do ajuste (3s por degrau de PWM); agora roda uma vez só.
+		// Boot a frio do DUT já na tensão alvo (uma vez por passo).
+		// O RST precisa ser OUTPUT LOW: após o teste UART o pino fica como INPUT
+		// e um digitalWrite(LOW) ali só desliga o pull-up, sem resetar o DUT.
+		// Cortar o Vbat também não serve: o capacitor de entrada segura o 3V3.
 		if (passoLed < PASSOS_FRESH_BOOT)
 		{
-			jiga.desligarTudo();
-			delay(1000);
-			digitalWrite(PIN_DUT_RST, LOW);
-			delay(1000);
-			digitalWrite(PIN_DUT_RST, HIGH);
-			delay(1000);
-			jiga.setVbat(true);
-			// Os 3s bloqueados não podem contar como tempo de curto
+			Serial.print(F("[LED PREP] Reset do DUT no passo "));
+			Serial.println(passoLed);
+			jiga.controlarAlvo(false);
+			delay(500);
+			jiga.controlarAlvo(true);
+			// O tempo bloqueado não pode contar como tempo de curto
 			timerCurto = millis();
 		}
 		// --- NOVA VALIDAÇÃO DA SAÍDA DA PLACA --- // tirei por ter um bug ao testar o cir
