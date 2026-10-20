@@ -3,6 +3,7 @@
 JigaHardware::JigaHardware() : lcd(LCD_ADDR, LCD_COLS, LCD_ROWS)
 {
 	pwmAtual = 255;
+	tUltimoAjuste = 0;
 	tamanhoBufferRaw = 0;
 	serialSoft = new SoftwareSerial(PIN_RX_SOFT, PIN_TX_SOFT);
 	btnUp = {HIGH, HIGH, 0};
@@ -75,6 +76,12 @@ bool JigaHardware::ajustarTensaoAutomatico(float alvo, float atual)
 	if (erro <= TOLERANCIA_AJUSTE)
 		return true;
 
+	// Limita a taxa de correção: o loop agora é rápido, e corrigir antes da
+	// saída acompanhar o degrau anterior faria a tensão passar do alvo.
+	if (millis() - tUltimoAjuste < INTERVALO_AJUSTE_MS)
+		return false;
+	tUltimoAjuste = millis();
+
 	int passo = (erro > 1.5) ? 10 : (erro > 0.5 ? 3 : 1);
 	setPWM(pwmAtual + ((atual < alvo) ? -passo : passo));
 	return false;
@@ -143,12 +150,12 @@ void JigaHardware::atualizarParteTela(int l, int c, const char *txt)
 // --- SENSORS & INPUTS ---
 float JigaHardware::lerADC(int pino)
 {
+	// Descarta a 1ª conversão após trocar de canal (o S&H do ADC ainda carrega
+	// a tensão do canal anterior). Sem delay entre amostras: ~0,7 ms por canal.
+	analogRead(pino);
 	long soma = 0;
 	for (int i = 0; i < 5; i++)
-	{
 		soma += analogRead(pino);
-		delay(1);
-	}
 	return (soma / 5.0) * (V_REF_AREF / 1023.0) * FATOR_CONVERSAO;
 }
 

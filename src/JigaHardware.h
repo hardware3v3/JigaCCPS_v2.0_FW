@@ -36,6 +36,7 @@ private:
 	LiquidCrystal_I2C lcd;
 	SoftwareSerial *serialSoft;
 	int pwmAtual;
+	unsigned long tUltimoAjuste;
 	static const int TAM_BUFFER = 64;
 	uint8_t bufferRaw[TAM_BUFFER];
 	int tamanhoBufferRaw;

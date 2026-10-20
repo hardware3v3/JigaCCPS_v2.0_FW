@@ -78,5 +78,10 @@ const float V_3V3_MIN = 3.1;
 const float V_3V3_MAX = 3.5;
 
 const float TOLERANCIA_AJUSTE = 0.10;
+// Intervalo mínimo entre correções de PWM: dá tempo do filtro/capacitor de saída
+// acompanhar o degrau antes da próxima correção (evita overshoot/oscilação).
+const unsigned long INTERVALO_AJUSTE_MS = 40;
+// Leituras consecutivas dentro da tolerância para considerar a tensão estabilizada.
+const uint8_t LEITURAS_ESTAVEIS_AJUSTE = 5;
 
 #endif

@@ -939,35 +939,67 @@ void TestController::handlePowerTest(Tecla t, LeituraSensores &s)
 		// passo++;
 	}
 }
-static uint8_t fresh_start = 2;
+// Passos que fazem boot a frio do DUT na tensão alvo (passos 0 e 1).
+static const int PASSOS_FRESH_BOOT = 2;
+
 void TestController::handleLedPrep(LeituraSensores &s)
 {
-	if (fresh_start) {
-		jiga.desligarTudo();
-		delay(1000);
-		digitalWrite(PIN_DUT_RST, LOW);
-		delay(1000);
-		digitalWrite(PIN_DUT_RST, HIGH);
-		delay(1000);
+	static unsigned long tUpdateDisplay = 0;
+	static uint8_t leiturasEstaveis = 0;
+
+	// Entrada no passo: desenha a tela UMA vez (antes era redesenhada a cada loop, ~80ms).
+	if (!flagEntradaEstado)
+	{
+		jiga.setVbat(true);
+
+		char alvoStr[10], msg[21];
+		dtostrf(listaTensoes[passoLed], 4, 1, alvoStr);
+		sprintf(msg, "Alvo: %sV", alvoStr);
+		jiga.limparTela();
+		jiga.mostrarTelaMensagem(F("3. AJUSTE LEDS"), msg, F("Lido:       V"), F("Aguarde..."));
+
+		leiturasEstaveis = 0;
+		tUpdateDisplay = 0;
+		flagEntradaEstado = true;
 	}
-	jiga.setVbat(true);
 
-	char alvoStr[10], msg[21];
-	dtostrf(listaTensoes[passoLed], 4, 1, alvoStr);
-	sprintf(msg, "Alvo: %sV", alvoStr);
-
-	jiga.mostrarTelaMensagem(F("3. AJUSTE LEDS"), msg, "Aguarde...", "");
+	if (millis() - tUpdateDisplay > 200)
+	{
+		char atualStr[10];
+		dtostrf(s.vLoad, 5, 2, atualStr);
+		jiga.atualizarParteTela(2, 6, atualStr);
+		tUpdateDisplay = millis();
+	}
 
 	if (verificarCurtoCircuito(listaTensoes[passoLed], s.vLoad))
 	{
 		dispararErroCurto();
 		return;
 	}
-	// Quando a Jiga finalmente estabilizar na tensão alvo:
+
+	// Só considera estabilizado após N leituras seguidas dentro da tolerância
 	if (jiga.ajustarTensaoAutomatico(listaTensoes[passoLed], s.vLoad))
+		leiturasEstaveis++;
+	else
+		leiturasEstaveis = 0;
+
+	// Quando a Jiga finalmente estabilizar na tensão alvo:
+	if (leiturasEstaveis >= LEITURAS_ESTAVEIS_AJUSTE)
 	{
-		if (fresh_start)
-			fresh_start--;
+		// Boot a frio do DUT já na tensão alvo. Antes este bloco rodava a cada
+		// iteração do ajuste (3s por degrau de PWM); agora roda uma vez só.
+		if (passoLed < PASSOS_FRESH_BOOT)
+		{
+			jiga.desligarTudo();
+			delay(1000);
+			digitalWrite(PIN_DUT_RST, LOW);
+			delay(1000);
+			digitalWrite(PIN_DUT_RST, HIGH);
+			delay(1000);
+			jiga.setVbat(true);
+			// Os 3s bloqueados não podem contar como tempo de curto
+			timerCurto = millis();
+		}
 		// --- NOVA VALIDAÇÃO DA SAÍDA DA PLACA --- // tirei por ter um bug ao testar o cir
 		// Índices do passoLed:
 		// 0 = "LEDS APAGADOS?"
@@ -1008,7 +1040,6 @@ void TestController::handleLedPrep(LeituraSensores &s)
 		flagEntradaEstado = false;
 		estadoAtual = ST_LED_TEST;
 	}
-	delay(15);
 }
 
 void TestController::handleLedTest(Tecla t, LeituraSensores &s)
