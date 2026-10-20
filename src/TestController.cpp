@@ -403,6 +403,12 @@ void TestController::amsTest(Tecla t, LeituraSensores &s)
 		musicaTocada = false;
 		isCir = false;
 		flagEntradaEstado = true;
+
+		// Reseta o watchdog de curto: sem isto, se o alvo (V_AMS_CHECK) for o mesmo
+		// de uma rodada anterior, o timer antigo continua valendo e o teste pode
+		// reprovar por "curto" quase instantaneamente ao reentrar nesta tela.
+		alvoVoutAtual = -1.0f;
+		timerCurto = millis();
 	}
 
 	if (t == TECLA_ESC)
@@ -447,13 +453,9 @@ void TestController::amsTest(Tecla t, LeituraSensores &s)
 			tUpdateDisplay = millis();
 		}
 
-		if (verificarCurtoCircuito(V_AMS_CHECK, s.vLoad))
-		{
-			Serial.println(F("[ERRO] Watchdog de curto desarmou na Rampa 20V!"));
-			dispararErroCurto();
-			return;
-		}
-
+		// Sem checagem de curto aqui: o Vbat ainda está desligado (degrau proposital em
+		// AMS_INIT), então a placa não está conectada e a subida de 0V a 20V é só o
+		// capacitor de saída da própria jiga carregando - pode legitimamente passar de 2s.
 		jiga.ajustarTensaoAutomatico(V_AMS_CHECK, s.vLoad);
 
 		if (s.vLoad >= (V_AMS_CHECK - 0.4) && s.vLoad <= (V_AMS_CHECK + 0.4))
