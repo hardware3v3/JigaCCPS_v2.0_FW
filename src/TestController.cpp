@@ -396,12 +396,19 @@ void TestController::amsTest(Tecla t, LeituraSensores &s)
 		AMS_HOLD_25V,
 		AMS_PASS,
 		AMS_FAIL_PIRATE,
-		AMS_FAIL_POWER
+		AMS_FAIL_POWER,
+		AMS_FAIL_3V3
 	};
 
 	static SubEstadoAMS subState = AMS_INIT;
 	static unsigned long tTimer = 0;
 	static unsigned long tUpdateDisplay = 0;
+
+	// Média do 3V3 no CHECK 20V e tempo fora da faixa no HOLD 25V
+	static float somaV3v3 = 0;
+	static uint16_t nV3v3 = 0;
+	static float v3v3Medio = 0;
+	static unsigned long tDentroFaixa = 0;
 
 	static bool erroMostrado = false;
 	static bool musicaTocada = false;
@@ -484,6 +491,8 @@ void TestController::amsTest(Tecla t, LeituraSensores &s)
 			Serial.println(F(" -> Ligando relé do Vbat (Degrau de Tensão)"));
 			jiga.setVbat(true);
 			tTimer = millis();
+			somaV3v3 = 0;
+			nV3v3 = 0;
 			subState = AMS_CHECK_20V;
 		}
 		break;
@@ -515,15 +524,29 @@ void TestController::amsTest(Tecla t, LeituraSensores &s)
 			tUpdateDisplay = millis();
 		}
 
+		// Acumula o 3V3 no último segundo antes da decisão (uma amostra só era sensível a ruído)
+		if (millis() - tTimer > 4000 - JANELA_MEDIA_3V3_MS)
+		{
+			somaV3v3 += s.v3v3;
+			nV3v3++;
+		}
+
 		if (millis() - tTimer > 4000)
 		{
+			v3v3Medio = (nV3v3 > 0) ? somaV3v3 / nV3v3 : s.v3v3;
+			Serial.print(F(" -> v3v3 medio: "));
+			Serial.print(v3v3Medio);
+			Serial.print(F(" ("));
+			Serial.print(nV3v3);
+			Serial.println(F(" amostras)"));
+
 			// Aqui fazemos as validações e jogamos direto os resultados finais
-			if (s.v3v3 <= 1.0)
+			if (v3v3Medio <= 1.0)
 			{
 				Serial.println(F(" -> DECISAO: Falha de Energia (v3v3 <= 1.0)"));
 				subState = AMS_FAIL_POWER;
 			}
-			else if (s.v3v3 >= V_3V3_MIN && s.v3v3 <= V_3V3_MAX)
+			else if (v3v3Medio >= V_3V3_MIN && v3v3Medio <= V_3V3_MAX)
 			{
 				Serial.println(F(" -> DECISAO: Aprovado! Placa Padrao 3.3V"));
 				isCir = false;
@@ -531,7 +554,7 @@ void TestController::amsTest(Tecla t, LeituraSensores &s)
 				tTimer = millis();
 				subState = AMS_RAMP_25V;
 			}
-			else if (s.v3v3 >= 4.7 && s.v3v3 <= 5.3)
+			else if (v3v3Medio >= 4.7 && v3v3Medio <= 5.3)
 			{
 				Serial.println(F(" -> DECISAO: Aprovado! Placa CIR 5.0V"));
 				isCir = true;
@@ -541,9 +564,8 @@ void TestController::amsTest(Tecla t, LeituraSensores &s)
 			}
 			else
 			{
-				Serial.print(F(" -> DECISAO: Falha! AMS Pirata. Lido: "));
-				Serial.println(s.v3v3);
-				subState = AMS_FAIL_PIRATE;
+				Serial.println(F(" -> DECISAO: Falha! 3V3 fora da faixa"));
+				subState = AMS_FAIL_3V3;
 			}
 		}
 		break;
@@ -573,6 +595,7 @@ void TestController::amsTest(Tecla t, LeituraSensores &s)
 		{
 			Serial.println(F("[RAMPA 25V] Alvo atingido! Iniciando stress..."));
 			tTimer = millis();
+			tDentroFaixa = millis();
 			subState = AMS_HOLD_25V;
 		}
 		break;
@@ -589,9 +612,14 @@ void TestController::amsTest(Tecla t, LeituraSensores &s)
 		float minPermitido = isCir ? 4.7 : V_3V3_MIN;
 		float maxPermitido = isCir ? 5.3 : V_3V3_MAX;
 
-		if (s.v3v3 < minPermitido || s.v3v3 > maxPermitido)
+		// Só reprova se o 3V3 ficar fora da faixa continuamente (ignora picos isolados)
+		if (s.v3v3 >= minPermitido && s.v3v3 <= maxPermitido)
+			tDentroFaixa = millis();
+		else if (millis() - tDentroFaixa > TEMPO_FORA_FAIXA_3V3_MS)
 		{
-			Serial.println(F("[HOLD 25V] ERRO! Regulador estourou no stress."));
+			Serial.print(F("[HOLD 25V] ERRO! Regulador estourou no stress. Lido: "));
+			Serial.println(s.v3v3);
+			v3v3Medio = s.v3v3;
 			subState = AMS_FAIL_PIRATE;
 			return;
 		}
@@ -674,7 +702,29 @@ void TestController::amsTest(Tecla t, LeituraSensores &s)
 		{
 			jiga.desligarTudo();
 			jiga.setPWM(255);
-			jiga.mostrarTelaMensagem(F("FALHA: AMS PIRATA"), F("Trocar Imediato!"), F("Nao aguentou carga"), F("PRESSIONE BOTAO"));
+			char lido[10], msgLido[21];
+			dtostrf(v3v3Medio, 4, 2, lido);
+			sprintf(msgLido, "Lido: %sV", lido);
+			jiga.mostrarTelaMensagem(F("FALHA: AMS PIRATA"), F("Nao aguentou 25V"), msgLido, F("PRESSIONE BOTAO"));
+			jiga.beepErro();
+			erroMostrado = true;
+		}
+		if (t != NENHUMA)
+		{
+			flagEntradaEstado = false;
+			estadoAtual = ST_REPROVADO;
+		}
+		break;
+
+	case AMS_FAIL_3V3:
+		if (!erroMostrado)
+		{
+			jiga.desligarTudo();
+			jiga.setPWM(255);
+			char lido[10], msgLido[21];
+			dtostrf(v3v3Medio, 4, 2, lido);
+			sprintf(msgLido, "Lido: %sV", lido);
+			jiga.mostrarTelaMensagem(F("FALHA: 3V3 FORA"), F("Esp: 3.0-3.6 / 5V"), msgLido, F("PRESSIONE BOTAO"));
 			jiga.beepErro();
 			erroMostrado = true;
 		}

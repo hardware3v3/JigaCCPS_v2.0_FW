@@ -74,8 +74,14 @@ const float V_TEST_CRITICAL = 18.0;
 // --- CONSTANTES PARA TESTE AMS ---
 const float V_AMS_CHECK = 20.0;	 // Tensão de estabilidade
 const float V_AMS_STRESS = 25.0; // Tensão de estresse (destrutiva)
-const float V_3V3_MIN = 3.1;
-const float V_3V3_MAX = 3.5;
+// Faixa do 3V3 da placa. O canal tem resolução de ~46mV (divisor 19:1 + AREF 2,495V),
+// então a faixa precisa de folga: 3,1V reprovava placas boas lidas em 3,06V.
+const float V_3V3_MIN = 3.0;
+const float V_3V3_MAX = 3.6;
+// Janela (antes do fim dos 4s do CHECK 20V) em que o 3V3 é promediado para a decisão
+const unsigned long JANELA_MEDIA_3V3_MS = 1000;
+// No HOLD 25V, o 3V3 precisa ficar fora da faixa continuamente por este tempo para reprovar
+const unsigned long TEMPO_FORA_FAIXA_3V3_MS = 500;
 
 const float TOLERANCIA_AJUSTE = 0.10;
 // Intervalo mínimo entre correções de PWM: dá tempo do filtro/capacitor de saída
