@@ -62,7 +62,7 @@ void TestController::run()
 		handleInitTest();
 		break;
 	case ST_COM_UART:
-		handleComUart();
+		handleComUart(s);
 		break;
 	case ST_POWER_CHECK:
 		handlePowerCheck(s);
@@ -808,7 +808,68 @@ void TestController::handleInitTest()
 	estadoAtual = ST_COM_UART;
 }
 
-void TestController::handleComUart()
+// ==========================================
+// CONSULTA DA PLACA (comando 0x04 0x81)
+// ==========================================
+void TestController::enviarConsultaPlaca()
+{
+	uint8_t pacote[4] = {0x04, 0x81};
+	size_t len = Protocolo::anexarCRC(pacote, 2);
+	jiga.limparBufferUART();
+	jiga.enviarBytesComoASCII(pacote, len);
+}
+
+bool TestController::lerConsultaPlaca(LeituraPlaca &out)
+{
+	if (!jiga.lerPacoteBinario())
+		return false;
+
+	uint8_t *bufRaw = jiga.getBufferBytes();
+	size_t tamRaw = jiga.getTamanhoBuffer();
+	RespostaInterpretada resp = Protocolo::interpretarPacote(bufRaw, tamRaw);
+
+	// Conversão Hex ASCII -> Bytes (para no fim de linha, como o interpretarPacote)
+	out.nBytes = 0;
+	for (size_t i = 0; i + 1 < tamRaw && out.nBytes < sizeof(out.bytes); i += 2)
+	{
+		if (bufRaw[i] == '\r' || bufRaw[i] == '\n')
+			break;
+		out.bytes[out.nBytes++] = (Protocolo::charParaByte(bufRaw[i]) << 4) | Protocolo::charParaByte(bufRaw[i + 1]);
+	}
+
+	// Precisa de 11 bytes de dados + 2 de CRC para ler V.Fonte/V.Bat sem pegar lixo.
+	// O byte 0 NÃO é eco do comando: a placa responde 0x0D.
+	out.valida = resp.crcValido && out.nBytes >= 13;
+	out.status = resp.status;
+	out.fw = (out.nBytes > 2) ? out.bytes[2] : 0;
+	out.vFonte = out.valida ? ((out.bytes[7] << 8) | out.bytes[8]) / 1000.0 : 0;
+	out.vBat = out.valida ? ((out.bytes[9] << 8) | out.bytes[10]) / 1000.0 : 0;
+	return true;
+}
+
+void TestController::logarComparacao(int passo, float alvo, const LeituraPlaca &p, const LeituraSensores &s)
+{
+	char hex[3];
+	Serial.print(F("[CMP] p="));       Serial.print(passo);
+	Serial.print(F(" alvo="));         Serial.print(alvo);
+	Serial.print(F(" valida="));       Serial.print(p.valida);
+	Serial.print(F(" fw="));           sprintf(hex, "%02X", p.fw);     Serial.print(hex);
+	Serial.print(F(" st="));           sprintf(hex, "%02X", p.status); Serial.print(hex);
+	Serial.print(F(" placaFonte="));   Serial.print(p.vFonte, 3);
+	Serial.print(F(" placaBat="));     Serial.print(p.vBat, 3);
+	Serial.print(F(" vLoad="));        Serial.print(s.vLoad);
+	Serial.print(F(" vCCPS="));        Serial.print(s.vCCPS);
+	Serial.print(F(" vCap="));         Serial.print(s.vCap);
+	Serial.print(F(" raw="));
+	for (uint8_t i = 0; i < p.nBytes; i++)
+	{
+		sprintf(hex, "%02X", p.bytes[i]);
+		Serial.print(hex);
+	}
+	Serial.println();
+}
+
+void TestController::handleComUart(LeituraSensores &s)
 {
 	static bool enviado = false;
 
@@ -828,49 +889,33 @@ void TestController::handleComUart()
 		flagEntradaEstado = true;
 	}
 
+	// Regula numa tensão conhecida para a comparação com a leitura da placa
+	// (antes ficava no PWM 150 em malha aberta, ~13,5V)
+	jiga.ajustarTensaoAutomatico(V_COMPARA_UART, s.vLoad);
+
 	if (!enviado && millis() - timerEstado > 1000)
 	{
-		uint8_t pacote[10];
-		pacote[0] = 0x04;
-		pacote[1] = 0x81;
-		size_t len = Protocolo::anexarCRC(pacote, 2);
-		jiga.enviarBytesComoASCII(pacote, len);
+		enviarConsultaPlaca();
 		enviado = true;
 		timerEstado = millis();
 	}
 
 	if (enviado)
 	{
-		if (jiga.lerPacoteBinario())
+		LeituraPlaca placa;
+		if (lerConsultaPlaca(placa))
 		{
-			uint8_t *bufRaw = jiga.getBufferBytes();
-			size_t tamRaw = jiga.getTamanhoBuffer();
-			RespostaInterpretada resp = Protocolo::interpretarPacote(bufRaw, tamRaw);
+			logarComparacao(-1, V_COMPARA_UART, placa, s);
 
-			if (resp.crcValido)
+			if (placa.valida)
 			{
-				uint8_t dados[32];
-				int idx = 0;
-
-				// Conversão Hex -> Byte usando Helper do Protocolo
-				for (size_t i = 0; i < tamRaw; i += 2)
+				if (placa.fw >= 0x04 && (placa.status == 0x81 || placa.status == 0x15))
 				{
-					if (i + 1 >= tamRaw || idx >= 32)
-						break;
-					uint8_t h = Protocolo::charParaByte(bufRaw[i]);
-					uint8_t l = Protocolo::charParaByte(bufRaw[i + 1]);
-					dados[idx++] = (h << 4) | l;
-				}
-
-				uint8_t fwVersion = dados[2];
-				uint16_t vFonte = (dados[7] << 8) | dados[8];
-				uint16_t vBat = (dados[9] << 8) | dados[10];
-
-				if (fwVersion >= 0x04 && (resp.status == 0x81 || resp.status == 0x15))
-				{
-					char msgFonte[21], msgBat[21];
-					sprintf(msgFonte, "V.Fonte: %d", vFonte);
-					sprintf(msgBat, "V.Bat:   %d", vBat);
+					char msgFonte[21], msgBat[21], v[10];
+					dtostrf(placa.vFonte, 5, 2, v);
+					sprintf(msgFonte, "V.Fonte: %sV", v);
+					dtostrf(placa.vBat, 5, 2, v);
+					sprintf(msgBat, "V.Bat:   %sV", v);
 					jiga.mostrarTelaMensagem(F("PLACA COMPATIVEL"), F("FW: v04 Detectado"), msgFonte, msgBat);
 
 					jiga.beepSucesso();
@@ -881,7 +926,7 @@ void TestController::handleComUart()
 				else
 				{
 					char msgErro[21];
-					sprintf(msgErro, "Lido: v%02X", fwVersion);
+					sprintf(msgErro, "Lido: v%02X", placa.fw);
 					jiga.mostrarTelaMensagem(F("ERRO VERSAO FW"), F("Esperado: v04"), msgErro, "Falha Serial");
 					jiga.beepErro();
 					delay(3000);
@@ -1116,6 +1161,10 @@ void TestController::handleLedTest(Tecla t, LeituraSensores &s)
 {
 	static unsigned long tUpdateDisplay = 0;
 	static int passoAnterior = -1;
+	// Consulta da placa (0x04) uma vez por passo, para comparar com a leitura da jiga
+	static unsigned long tEntradaPasso = 0;
+	static bool consultaEnviada = false;
+	static bool consultaFeita = false;
 	// INJETE ESTA LINHA AQUI:
 	if (verificarCurtoCircuito(listaTensoes[passoLed], s.vLoad))
 	{
@@ -1131,6 +1180,36 @@ void TestController::handleLedTest(Tecla t, LeituraSensores &s)
 		passoAnterior = passoLed;
 		flagEntradaEstado = true;
 		tUpdateDisplay = 0;
+		tEntradaPasso = millis();
+		consultaEnviada = false;
+		consultaFeita = false;
+	}
+
+	// Espera a placa estabilizar no passo, consulta e loga placa x jiga (sem bloquear)
+	if (!consultaFeita)
+	{
+		if (!consultaEnviada && millis() - tEntradaPasso > ATRASO_CONSULTA_LED_MS)
+		{
+			enviarConsultaPlaca();
+			consultaEnviada = true;
+			tEntradaPasso = millis();
+		}
+		else if (consultaEnviada)
+		{
+			LeituraPlaca placa;
+			if (lerConsultaPlaca(placa))
+			{
+				logarComparacao(passoLed, listaTensoes[passoLed], placa, s);
+				consultaFeita = true;
+			}
+			else if (millis() - tEntradaPasso > 1000)
+			{
+				Serial.print(F("[CMP] p="));
+				Serial.print(passoLed);
+				Serial.println(F(" sem resposta"));
+				consultaFeita = true;
+			}
+		}
 	}
 
 	if (millis() - tUpdateDisplay > 200)

@@ -83,6 +83,11 @@ const unsigned long JANELA_MEDIA_3V3_MS = 1000;
 // No HOLD 25V, o 3V3 precisa ficar fora da faixa continuamente por este tempo para reprovar
 const unsigned long TEMPO_FORA_FAIXA_3V3_MS = 500;
 
+// Tensão regulada durante o teste serial, usada para comparar a leitura da placa
+const float V_COMPARA_UART = 13.0;
+// Atraso após entrar em cada passo de LED antes de consultar a placa (0x04)
+const unsigned long ATRASO_CONSULTA_LED_MS = 1000;
+
 const float TOLERANCIA_AJUSTE = 0.10; // Banda para TRAVAR no alvo
 const float HISTERESE_AJUSTE = 0.20;  // Banda para DESTRAVAR e voltar a corrigir
 // Intervalo mínimo entre correções de PWM: dá tempo do filtro/capacitor de saída

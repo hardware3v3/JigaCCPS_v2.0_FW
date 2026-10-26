@@ -3,6 +3,18 @@
 
 #include "JigaHardware.h"
 
+// Resposta da placa ao comando 0x04 0x81 (versão + tensões medidas pela placa)
+struct LeituraPlaca
+{
+	bool valida;	   // CRC ok, comando 0x04 e tamanho mínimo
+	uint8_t status;	   // byte 1 (0x81 / 0x15)
+	uint8_t fw;	   // byte 2
+	float vFonte;	   // bytes 7-8, mV -> V
+	float vBat;	   // bytes 9-10, mV -> V
+	uint8_t bytes[16]; // pacote completo convertido (inclui CRC)
+	uint8_t nBytes;
+};
+
 enum EstadoSistema
 {
 	ST_MENU,
@@ -48,7 +60,7 @@ private:
 	void handleManual(Tecla t, LeituraSensores &s);
 	void amsTest(Tecla t, LeituraSensores &s); // <--- Declaração do teste AMS
 	void handleInitTest();
-	void handleComUart();
+	void handleComUart(LeituraSensores &s);
 	void handlePowerCheck(LeituraSensores &s);
 	void handlePowerTest(Tecla t, LeituraSensores &s);
 	void handleLedPrep(LeituraSensores &s);
@@ -61,6 +73,11 @@ private:
 	void dispararErroCurto();
 
 	void resetarSistema();
+
+	// --- CONSULTA DA PLACA (comando 0x04) ---
+	void enviarConsultaPlaca();
+	bool lerConsultaPlaca(LeituraPlaca &out); // true se chegou algum pacote
+	void logarComparacao(int passo, float alvo, const LeituraPlaca &p, const LeituraSensores &s);
 
 public:
 	TestController(JigaHardware &hw);
