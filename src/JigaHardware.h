@@ -37,6 +37,8 @@ private:
 	SoftwareSerial *serialSoft;
 	int pwmAtual;
 	unsigned long tUltimoAjuste;
+	float alvoTravado;
+	bool tensaoTravada;
 	static const int TAM_BUFFER = 64;
 	uint8_t bufferRaw[TAM_BUFFER];
 	int tamanhoBufferRaw;

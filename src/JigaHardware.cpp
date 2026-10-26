@@ -4,6 +4,8 @@ JigaHardware::JigaHardware() : lcd(LCD_ADDR, LCD_COLS, LCD_ROWS)
 {
 	pwmAtual = 255;
 	tUltimoAjuste = 0;
+	alvoTravado = -1.0;
+	tensaoTravada = false;
 	tamanhoBufferRaw = 0;
 	serialSoft = new SoftwareSerial(PIN_RX_SOFT, PIN_TX_SOFT);
 	btnUp = {HIGH, HIGH, 0};
@@ -73,8 +75,26 @@ int JigaHardware::getPWM() { return pwmAtual; }
 bool JigaHardware::ajustarTensaoAutomatico(float alvo, float atual)
 {
 	float erro = abs(atual - alvo);
+
+	// Histerese: depois de travar no alvo, só volta a corrigir se sair da banda
+	// maior. Sem isso o ruído da leitura (~±0,1V, mesma ordem de 1 passo de PWM)
+	// fazia o PWM ficar alternando sem parar em volta do alvo.
+	if (alvo != alvoTravado)
+	{
+		alvoTravado = alvo;
+		tensaoTravada = false;
+	}
+	if (tensaoTravada)
+	{
+		if (erro <= HISTERESE_AJUSTE)
+			return true;
+		tensaoTravada = false;
+	}
 	if (erro <= TOLERANCIA_AJUSTE)
+	{
+		tensaoTravada = true;
 		return true;
+	}
 
 	// Limita a taxa de correção: o loop agora é rápido, e corrigir antes da
 	// saída acompanhar o degrau anterior faria a tensão passar do alvo.
@@ -151,12 +171,16 @@ void JigaHardware::atualizarParteTela(int l, int c, const char *txt)
 float JigaHardware::lerADC(int pino)
 {
 	// Descarta a 1ª conversão após trocar de canal (o S&H do ADC ainda carrega
-	// a tensão do canal anterior). Sem delay entre amostras: ~0,7 ms por canal.
+	// a tensão do canal anterior). As 8 amostras são espalhadas por ~2ms, um
+	// período do PWM (~490Hz), para a média não depender da fase do ripple.
 	analogRead(pino);
 	long soma = 0;
-	for (int i = 0; i < 5; i++)
+	for (int i = 0; i < 8; i++)
+	{
 		soma += analogRead(pino);
-	return (soma / 5.0) * (V_REF_AREF / 1023.0) * FATOR_CONVERSAO;
+		delayMicroseconds(140); // + ~112us da conversão = ~250us por amostra
+	}
+	return (soma / 8.0) * (V_REF_AREF / 1023.0) * FATOR_CONVERSAO;
 }
 
 LeituraSensores JigaHardware::lerTudo()

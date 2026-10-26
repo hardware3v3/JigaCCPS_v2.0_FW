@@ -83,7 +83,8 @@ const unsigned long JANELA_MEDIA_3V3_MS = 1000;
 // No HOLD 25V, o 3V3 precisa ficar fora da faixa continuamente por este tempo para reprovar
 const unsigned long TEMPO_FORA_FAIXA_3V3_MS = 500;
 
-const float TOLERANCIA_AJUSTE = 0.10;
+const float TOLERANCIA_AJUSTE = 0.10; // Banda para TRAVAR no alvo
+const float HISTERESE_AJUSTE = 0.20;  // Banda para DESTRAVAR e voltar a corrigir
 // Intervalo mínimo entre correções de PWM: dá tempo do filtro/capacitor de saída
 // acompanhar o degrau antes da próxima correção (evita overshoot/oscilação).
 const unsigned long INTERVALO_AJUSTE_MS = 40;
