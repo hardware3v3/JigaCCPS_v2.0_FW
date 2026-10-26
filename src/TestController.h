@@ -27,7 +27,8 @@ enum EstadoSistema
 	ST_LED_PREP,
 	ST_LED_TEST,
 	ST_APROVADO,
-	ST_REPROVADO
+	ST_REPROVADO,
+	ST_DIVERGENCIA // Leitura da placa diverge da jiga: operador aceita ou reprova
 };
 
 class TestController
@@ -45,6 +46,17 @@ private:
 				 // --- VARIÁVEIS DE SEGURANÇA (NOVO) ---
 	float alvoVoutAtual;
 	unsigned long timerCurto;
+
+	// --- CONSULTA DA PLACA / DIVERGÊNCIA ---
+	bool consultaPendente;	// LED_PREP arma uma consulta por passo
+	bool consultaEnviada;
+	unsigned long tConsulta;
+	uint8_t tentativasConsulta; // reenvios após resposta inválida/ausente
+	bool confirmandoDiv;	    // divergiu 1x: reconsulta antes de alarmar
+	float placaBatPasso;	    // V.Bat lido da placa no passo atual (-1 = ainda não lido)
+	EstadoSistema estadoRetornoDiv; // para onde ENTER volta na tela de divergência
+	float alvoDiv;			// tensão mantida enquanto a tela de divergência está aberta
+	float divPlacaFonte, divJigaFonte, divPlacaBat, divJigaBat;
 
 	// Configuração de Testes
 	static const int TOTAL_PASSOS_LED = 10;
@@ -78,6 +90,11 @@ private:
 	void enviarConsultaPlaca();
 	bool lerConsultaPlaca(LeituraPlaca &out); // true se chegou algum pacote
 	void logarComparacao(int passo, float alvo, const LeituraPlaca &p, const LeituraSensores &s);
+	float valorCanal(CanalRef canal, const LeituraSensores &s);
+	bool leituraPlacaDiverge(const LeituraPlaca &p, const LeituraSensores &s);
+	void abrirDivergencia(EstadoSistema retorno, float alvo);
+	void handleDivergencia(Tecla t, LeituraSensores &s);
+	void mostrarLeituraPlacaLcd();
 
 public:
 	TestController(JigaHardware &hw);

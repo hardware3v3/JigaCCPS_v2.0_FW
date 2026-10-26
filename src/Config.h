@@ -88,6 +88,23 @@ const float V_COMPARA_UART = 13.0;
 // Atraso após entrar em cada passo de LED antes de consultar a placa (0x04)
 const unsigned long ATRASO_CONSULTA_LED_MS = 1000;
 
+// Comparação da leitura da placa (0x04) com a leitura da jiga
+const float TOLERANCIA_LEITURA_PLACA = 0.30;
+// Canal da jiga usado como referência para cada valor informado pela placa.
+// Captura de 26/10/2026: V.Bat acompanha vLoad (dif. máx. 0,13V); V.Fonte vem
+// sempre 0 (nada ligado na entrada fonte da placa), então fica sem comparação.
+enum CanalRef
+{
+	REF_NENHUM,
+	REF_VLOAD,
+	REF_VCCPS,
+	REF_VCAP
+};
+const CanalRef REF_VFONTE = REF_NENHUM;
+const CanalRef REF_VBAT = REF_VLOAD;
+// O ADC da placa satura em 15,934V (0x3E3E): acima disto não compara
+const float V_MAX_LEITURA_PLACA = 15.5;
+
 const float TOLERANCIA_AJUSTE = 0.10; // Banda para TRAVAR no alvo
 const float HISTERESE_AJUSTE = 0.20;  // Banda para DESTRAVAR e voltar a corrigir
 // Intervalo mínimo entre correções de PWM: dá tempo do filtro/capacitor de saída

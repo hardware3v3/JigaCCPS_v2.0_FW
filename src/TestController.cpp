@@ -7,6 +7,12 @@ TestController::TestController(JigaHardware &hw) : jiga(hw)
 	opcaoMenu = 0;
 	passoLed = 0;
 	flagEntradaEstado = false;
+	consultaPendente = false;
+	consultaEnviada = false;
+	tConsulta = 0;
+	placaBatPasso = -1;
+	estadoRetornoDiv = ST_MENU;
+	alvoDiv = 0;
 }
 
 void TestController::begin()
@@ -81,6 +87,9 @@ void TestController::run()
 		break;
 	case ST_REPROVADO:
 		handleReprovado(t);
+		break;
+	case ST_DIVERGENCIA:
+		handleDivergencia(t, s);
 		break;
 	}
 }
@@ -869,6 +878,116 @@ void TestController::logarComparacao(int passo, float alvo, const LeituraPlaca &
 	Serial.println();
 }
 
+float TestController::valorCanal(CanalRef canal, const LeituraSensores &s)
+{
+	switch (canal)
+	{
+	case REF_VLOAD:
+		return s.vLoad;
+	case REF_VCCPS:
+		return s.vCCPS;
+	case REF_VCAP:
+		return s.vCap;
+	default:
+		return 0;
+	}
+}
+
+// Compara V.Fonte/V.Bat da placa com o canal de referência da jiga (Config.h).
+// Guarda os valores para a tela de divergência.
+bool TestController::leituraPlacaDiverge(const LeituraPlaca &p, const LeituraSensores &s)
+{
+	divPlacaFonte = p.vFonte;
+	divJigaFonte = valorCanal(REF_VFONTE, s);
+	divPlacaBat = p.vBat;
+	divJigaBat = valorCanal(REF_VBAT, s);
+
+	// Acima de V_MAX_LEITURA_PLACA o ADC da placa satura: não compara
+	bool diverge = false;
+	if (REF_VFONTE != REF_NENHUM && divJigaFonte <= V_MAX_LEITURA_PLACA &&
+	    abs(divPlacaFonte - divJigaFonte) > TOLERANCIA_LEITURA_PLACA)
+		diverge = true;
+	if (REF_VBAT != REF_NENHUM && divJigaBat <= V_MAX_LEITURA_PLACA &&
+	    abs(divPlacaBat - divJigaBat) > TOLERANCIA_LEITURA_PLACA)
+		diverge = true;
+
+	if (diverge)
+		Serial.println(F("[CMP] DIVERGENCIA acima da tolerancia"));
+	return diverge;
+}
+
+// Linha 3 do teste de LEDs: "J:xx.xxV P:xx.xxV" -> escreve só a parte da placa (col. 11)
+void TestController::mostrarLeituraPlacaLcd()
+{
+	char v[8];
+	if (placaBatPasso < 0)
+		strcpy_P(v, PSTR("--.--"));
+	else if (placaBatPasso >= V_MAX_LEITURA_PLACA)
+		strcpy_P(v, PSTR(">15.5"));
+	else
+		dtostrf(placaBatPasso, 5, 2, v);
+	jiga.atualizarParteTela(2, 11, v);
+}
+
+void TestController::abrirDivergencia(EstadoSistema retorno, float alvo)
+{
+	estadoRetornoDiv = retorno;
+	alvoDiv = alvo;
+	flagEntradaEstado = false;
+	estadoAtual = ST_DIVERGENCIA;
+}
+
+// Tela de divergência: a tensão continua regulada (sem delay) até o operador decidir
+void TestController::handleDivergencia(Tecla t, LeituraSensores &s)
+{
+	if (verificarCurtoCircuito(alvoDiv, s.vLoad))
+	{
+		dispararErroCurto();
+		return;
+	}
+	jiga.ajustarTensaoAutomatico(alvoDiv, s.vLoad);
+
+	if (!flagEntradaEstado)
+	{
+		char l2[21], l3[21], p[8], j[8];
+		if (REF_VFONTE != REF_NENHUM)
+		{
+			dtostrf(divPlacaFonte, 5, 2, p);
+			dtostrf(divJigaFonte, 5, 2, j);
+			sprintf(l2, "Fon P:%s J:%s", p, j);
+		}
+		else
+			strcpy_P(l2, PSTR("Fon: nao comparado"));
+		if (REF_VBAT != REF_NENHUM)
+		{
+			dtostrf(divPlacaBat, 5, 2, p);
+			dtostrf(divJigaBat, 5, 2, j);
+			sprintf(l3, "Bat P:%s J:%s", p, j);
+		}
+		else
+			strcpy_P(l3, PSTR("Bat: nao comparado"));
+
+		jiga.limparTela();
+		jiga.mostrarTelaMensagem(F("DIVERGE LEITURA"), l2, l3, F("ENTER:aceita ESC:rep"));
+		jiga.beepErro();
+		flagEntradaEstado = true;
+	}
+
+	if (t == TECLA_ENTER)
+	{
+		Serial.println(F("[CMP] divergencia ACEITA pelo operador"));
+		jiga.beep();
+		flagEntradaEstado = false;
+		estadoAtual = estadoRetornoDiv;
+	}
+	else if (t == TECLA_ESC)
+	{
+		Serial.println(F("[CMP] divergencia REPROVADA pelo operador"));
+		flagEntradaEstado = false;
+		estadoAtual = ST_REPROVADO;
+	}
+}
+
 void TestController::handleComUart(LeituraSensores &s)
 {
 	static bool enviado = false;
@@ -922,6 +1041,8 @@ void TestController::handleComUart(LeituraSensores &s)
 					delay(3000);
 					flagEntradaEstado = false;
 					estadoAtual = ST_POWER_CHECK;
+					if (leituraPlacaDiverge(placa, s))
+						abrirDivergencia(ST_POWER_CHECK, V_COMPARA_UART);
 				}
 				else
 				{
@@ -1152,6 +1273,14 @@ void TestController::handleLedPrep(LeituraSensores &s)
 		// }
 		// ----------------------------------------
 
+		// Arma a consulta da placa para este passo (feita no LED_TEST)
+		consultaPendente = true;
+		consultaEnviada = false;
+		tConsulta = millis();
+		tentativasConsulta = 0;
+		confirmandoDiv = false;
+		placaBatPasso = -1;
+
 		flagEntradaEstado = false;
 		estadoAtual = ST_LED_TEST;
 	}
@@ -1161,10 +1290,6 @@ void TestController::handleLedTest(Tecla t, LeituraSensores &s)
 {
 	static unsigned long tUpdateDisplay = 0;
 	static int passoAnterior = -1;
-	// Consulta da placa (0x04) uma vez por passo, para comparar com a leitura da jiga
-	static unsigned long tEntradaPasso = 0;
-	static bool consultaEnviada = false;
-	static bool consultaFeita = false;
 	// INJETE ESTA LINHA AQUI:
 	if (verificarCurtoCircuito(listaTensoes[passoLed], s.vLoad))
 	{
@@ -1176,51 +1301,93 @@ void TestController::handleLedTest(Tecla t, LeituraSensores &s)
 	if (!flagEntradaEstado || passoLed != passoAnterior)
 	{
 		jiga.limparTela();
-		jiga.mostrarTelaMensagem(F("3. TESTE LEDS"), listaMsgs[passoLed], "V-JIGA:      V", "DIR >> CONFIRMA");
+		// Linha 3: J = jiga (ao vivo), P = placa via UART (--.-- até a leitura chegar)
+		jiga.mostrarTelaMensagem(F("3. TESTE LEDS"), listaMsgs[passoLed], F("J:     V P:     V"),
+					 consultaPendente ? F("LENDO PLACA...") : F("DIR >> CONFIRMA"));
+		mostrarLeituraPlacaLcd();
 		passoAnterior = passoLed;
 		flagEntradaEstado = true;
 		tUpdateDisplay = 0;
-		tEntradaPasso = millis();
-		consultaEnviada = false;
-		consultaFeita = false;
 	}
 
-	// Espera a placa estabilizar no passo, consulta e loga placa x jiga (sem bloquear)
-	if (!consultaFeita)
+	// Consulta da placa (0x04), armada pelo LED_PREP uma vez por passo: espera a
+	// placa estabilizar, consulta e compara com a jiga (sem bloquear).
+	if (consultaPendente)
 	{
-		if (!consultaEnviada && millis() - tEntradaPasso > ATRASO_CONSULTA_LED_MS)
+		bool terminou = false;
+		if (!consultaEnviada && millis() - tConsulta > ATRASO_CONSULTA_LED_MS)
 		{
 			enviarConsultaPlaca();
 			consultaEnviada = true;
-			tEntradaPasso = millis();
+			tConsulta = millis();
 		}
 		else if (consultaEnviada)
 		{
 			LeituraPlaca placa;
-			if (lerConsultaPlaca(placa))
-			{
+			bool chegou = lerConsultaPlaca(placa);
+			if (chegou)
 				logarComparacao(passoLed, listaTensoes[passoLed], placa, s);
-				consultaFeita = true;
-			}
-			else if (millis() - tEntradaPasso > 1000)
+
+			if (chegou && placa.valida)
 			{
-				Serial.print(F("[CMP] p="));
-				Serial.print(passoLed);
-				Serial.println(F(" sem resposta"));
-				consultaFeita = true;
+				placaBatPasso = placa.vBat;
+				mostrarLeituraPlacaLcd();
+				if (!leituraPlacaDiverge(placa, s))
+					terminou = true;
+				else if (!confirmandoDiv)
+				{
+					// Pode ser transitório (ex.: capacitor ainda subindo): reconsulta antes de alarmar
+					Serial.println(F("[CMP] confirmando divergencia..."));
+					confirmandoDiv = true;
+					consultaEnviada = false;
+					tConsulta = millis();
+				}
+				else
+				{
+					consultaPendente = false;
+					abrirDivergencia(ST_LED_TEST, listaTensoes[passoLed]);
+					return;
+				}
 			}
+			else if (chegou || millis() - tConsulta > 1000)
+			{
+				// Resposta inválida (ex.: placa recém-resetada) ou ausente: tenta de novo
+				if (tentativasConsulta < 2)
+				{
+					tentativasConsulta++;
+					Serial.print(F("[CMP] nova tentativa "));
+					Serial.println(tentativasConsulta);
+					consultaEnviada = false;
+					tConsulta = millis() - ATRASO_CONSULTA_LED_MS + 300; // reenvia em ~300ms
+				}
+				else
+				{
+					Serial.print(F("[CMP] p="));
+					Serial.print(passoLed);
+					Serial.println(F(" sem resposta valida"));
+					terminou = true;
+				}
+			}
+		}
+		if (terminou)
+		{
+			consultaPendente = false;
+			char l4[21];
+			strcpy_P(l4, PSTR("DIR >> CONFIRMA     "));
+			jiga.escreverLinha(3, l4);
 		}
 	}
 
 	if (millis() - tUpdateDisplay > 200)
 	{
 		char atualStr[10];
-		dtostrf(s.vLoad, 4, 2, atualStr);
-		jiga.atualizarParteTela(2, 8, atualStr);
+		dtostrf(s.vLoad, 5, 2, atualStr);
+		jiga.atualizarParteTela(2, 2, atualStr);
 		tUpdateDisplay = millis();
 	}
 
-	if (t == TECLA_ENTER)
+	// ENTER só vale depois da consulta da placa, senão o passo fica sem comparação
+	if (t == TECLA_ENTER && !consultaPendente)
 	{
 		jiga.beep();
 		passoLed++;
